@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Teacher } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 
 export const TeacherEditor = () => {
+  const { t } = useTranslation();
   const { project, updateTeachers } = useProject();
   const teachers = project?.teachers || [];
 
@@ -28,7 +30,7 @@ export const TeacherEditor = () => {
   };
 
   const handleRemoveTeacher = (id: string) => {
-    if (confirm('Are you sure you want to delete this teacher?')) {
+    if (confirm(t('confirm_delete_teacher'))) {
       updateTeachers(teachers.filter(t => t.id !== id));
     }
   };
@@ -46,15 +48,16 @@ export const TeacherEditor = () => {
     })).filter(t => t.name);
     
     updateTeachers([...teachers, ...imported]);
+    alert(t('import_success', { count: imported.length }));
   };
 
   return (
     <div className="entity-editor">
       <div className="view-header">
-        <h2>Teachers</h2>
+        <h2>{t('teachers')}</h2>
         <div className="header-actions" style={{ display: 'flex', gap: '1rem' }}>
-          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">Import Data</button>
-          <button onClick={() => setIsModalOpen(true)} className="primary-btn">Add Teacher</button>
+          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">{t('import_data')}</button>
+          <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_teacher')}</button>
         </div>
       </div>
 
@@ -68,15 +71,15 @@ export const TeacherEditor = () => {
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        title="Add New Teacher"
+        title={t('new_teacher')}
         actions={
           <>
-            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">Cancel</button>
-            <button onClick={handleAddTeacher} className="primary-btn">Create Teacher</button>
+            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAddTeacher} className="primary-btn">{t('create')}</button>
           </>
         }
       >
-        <FormField label="Full Name">
+        <FormField label={t('full_name')}>
           <input 
             type="text" 
             placeholder="e.g. John Doe" 
@@ -85,7 +88,7 @@ export const TeacherEditor = () => {
             autoFocus
           />
         </FormField>
-        <FormField label="Short Name / Initials">
+        <FormField label={t('short_name')}>
           <input 
             type="text" 
             placeholder="e.g. J.D." 
@@ -98,10 +101,10 @@ export const TeacherEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Short Name</th>
-            <th>Subjects</th>
-            <th style={{ width: '100px' }}>Actions</th>
+            <th>{t('name')}</th>
+            <th>{t('short_name')}</th>
+            <th>{t('subjects')}</th>
+            <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -121,15 +124,15 @@ export const TeacherEditor = () => {
                   onChange={(e) => handleUpdateTeacher(teacher.id, { shortName: e.target.value })}
                 />
               </td>
-              <td>{teacher.subjects.length} subjects</td>
+              <td>{teacher.subjects.length}</td>
               <td>
-                <button onClick={() => handleRemoveTeacher(teacher.id)} className="delete-btn">Delete</button>
+                <button onClick={() => handleRemoveTeacher(teacher.id)} className="delete-btn">{t('delete')}</button>
               </td>
             </tr>
           ))}
           {teachers.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">No teachers added yet. Click "Add Teacher" to start.</td>
+              <td colSpan={4} className="empty-row">{t('no_data', { type: 'teacher' })}</td>
             </tr>
           )}
         </tbody>
