@@ -78,8 +78,25 @@ function AppContent() {
           <h1>{t('app_title')}</h1>
           {project && <span className="project-badge">{project.school.name}</span>}
         </div>
-        <div className="status-bar">
-          <span>Worker: {workerStatus}</span>
+        
+        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <select 
+            value={i18n.language} 
+            onChange={(e) => i18n.changeLanguage(e.target.value)}
+            style={{ 
+              background: '#333', 
+              color: '#fff', 
+              border: '1px solid #444', 
+              borderRadius: '4px', 
+              padding: '0.4rem' 
+            }}
+          >
+            <option value="en">English</option>
+            <option value="uk">Українська</option>
+          </select>
+          <div className="status-bar">
+            <span>{workerStatus}</span>
+          </div>
         </div>
       </header>
       
@@ -105,10 +122,6 @@ function AppContent() {
               <div className="nav-footer">
                 <button onClick={() => exportProject(project)}>Export .schoolproj</button>
                 <button onClick={handleReset} className="reset-btn">{t('cancel')} / Reset</button>
-                <div style={{ padding: '1rem', display: 'flex', gap: '0.5rem' }}>
-                  <button onClick={() => i18n.changeLanguage('en')} style={{ background: i18n.language === 'en' ? '#333' : 'transparent', color: '#fff', border: '1px solid #444', borderRadius: '4px', padding: '0.2rem 0.5rem' }}>EN</button>
-                  <button onClick={() => i18n.changeLanguage('uk')} style={{ background: i18n.language === 'uk' ? '#333' : 'transparent', color: '#fff', border: '1px solid #444', borderRadius: '4px', padding: '0.2rem 0.5rem' }}>UK</button>
-                </div>
               </div>
             </nav>
 

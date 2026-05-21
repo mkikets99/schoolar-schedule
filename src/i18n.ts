@@ -14,7 +14,12 @@ i18n
       en: { translation: enTranslation },
       uk: { translation: ukTranslation }
     },
+    supportedLngs: ['en', 'uk'],
     fallbackLng: 'en',
+    detection: {
+      order: ['navigator', 'localStorage', 'htmlTag'],
+      caches: ['localStorage'],
+    },
     interpolation: {
       escapeValue: false,
     },
