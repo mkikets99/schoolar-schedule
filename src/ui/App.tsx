@@ -15,7 +15,7 @@ import './index.css';
 function AppContent() {
   const { t, i18n } = useTranslation();
   const { project, isLoading, updateGeneratedSchedule } = useProject();
-  const [workerStatus, setWorkerStatus] = useState<string>('Initializing...');
+  const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
@@ -26,11 +26,11 @@ function AppContent() {
     worker.onmessage = (event) => {
       const { type, payload } = event.data;
       if (type === 'READY') {
-        setWorkerStatus('Worker Ready');
+        setWorkerStatus(t('worker_ready'));
       } else if (type === 'PROGRESS') {
-        setWorkerStatus(`Generating: ${payload.progress}%`);
+        setWorkerStatus(`${t('generating')} ${payload.progress}%`);
       } else if (type === 'RESULT') {
-        setWorkerStatus('Schedule Generated');
+        setWorkerStatus(t('schedule_generated'));
         updateGeneratedSchedule(payload);
       }
     };
@@ -47,7 +47,7 @@ function AppContent() {
 
   const handleGenerateSchedule = () => {
     if (workerRef.current && project) {
-      setWorkerStatus('Starting generation...');
+      setWorkerStatus(t('starting_gen'));
       workerRef.current.postMessage({
         type: 'GENERATE_SCHEDULE',
         payload: project
@@ -56,7 +56,7 @@ function AppContent() {
   };
 
   const handleReset = () => {
-    if (confirm('Are you sure you want to delete the current project? All unsaved data will be lost.')) {
+    if (confirm(t('confirm_reset'))) {
       indexedDB.deleteDatabase('SchoolarScheduleDB');
       window.location.reload(); 
     }
@@ -66,7 +66,7 @@ function AppContent() {
     return (
       <div className="loading-screen">
         <div className="loader"></div>
-        <p>Initializing Workspace...</p>
+        <p>{t('loading')}</p>
       </div>
     );
   }
@@ -121,7 +121,7 @@ function AppContent() {
 
               <div className="nav-footer">
                 <button onClick={() => exportProject(project)}>Export .schoolproj</button>
-                <button onClick={handleReset} className="reset-btn">{t('cancel')} / Reset</button>
+                <button onClick={handleReset} className="reset-btn">{t('cancel')} / {t('reset')}</button>
               </div>
             </nav>
 
@@ -129,29 +129,29 @@ function AppContent() {
               {currentView === 'dashboard' && (
                 <section className="dashboard">
                   <div className="dashboard-hero">
-                    <h2>Welcome to {project.school.name}</h2>
-                    <p>Your scheduling environment is ready.</p>
+                    <h2>{t('welcome_to')} {project.school.name}</h2>
+                    <p>{t('manage_structure_desc')}</p>
                   </div>
                   
                   <div className="dashboard-grid">
                     <div className="stat-card">
-                      <h3>Structure</h3>
+                      <h3>{t('structure')}</h3>
                       <div className="stats-list">
-                        <div className="stat-item">Teachers: <strong>{project.teachers?.length || 0}</strong></div>
-                        <div className="stat-item">Subjects: <strong>{project.subjects?.length || 0}</strong></div>
-                        <div className="stat-item">Groups: <strong>{project.groups?.length || 0}</strong></div>
-                        <div className="stat-item">Rooms: <strong>{project.rooms?.length || 0}</strong></div>
+                        <div className="stat-item">{t('teachers_count', { count: project.teachers?.length || 0 })}</div>
+                        <div className="stat-item">{t('subjects_count', { count: project.subjects?.length || 0 })}</div>
+                        <div className="stat-item">{t('groups_count', { count: project.groups?.length || 0 })}</div>
+                        <div className="stat-item">{t('rooms_count', { count: project.rooms?.length || 0 })}</div>
                       </div>
-                      <button onClick={() => setCurrentView('teachers')} className="card-action">Manage Structure</button>
+                      <button onClick={() => setCurrentView('teachers')} className="card-action">{t('manage_structure')}</button>
                     </div>
 
                     <div className="stat-card primary">
-                      <h3>Scheduling</h3>
+                      <h3>{t('scheduling')}</h3>
                       <div className="stats-list">
-                        <div className="stat-item">Curriculum Rules: <strong>{project.curriculum?.length || 0}</strong></div>
-                        <div className="stat-item">Hours Assigned: <strong>{project.generatedSchedule?.schedule?.length || 0}</strong></div>
+                        <div className="stat-item">{t('curriculum_rules_count', { count: project.curriculum?.length || 0 })}</div>
+                        <div className="stat-item">{t('hours_assigned_count', { count: project.generatedSchedule?.schedule?.length || 0 })}</div>
                       </div>
-                      <button onClick={() => setCurrentView('schedule')} className="card-action">Go to Scheduling</button>
+                      <button onClick={() => setCurrentView('schedule')} className="card-action">{t('go_to_scheduling')}</button>
                     </div>
                   </div>
                 </section>
@@ -166,7 +166,7 @@ function AppContent() {
                 <section className="schedule-view">
                   <div className="view-header">
                     <h2>{t('schedule')}</h2>
-                    <button onClick={handleGenerateSchedule} className="generate-btn-small">Regenerate</button>
+                    <button onClick={handleGenerateSchedule} className="generate-btn-small">{t('regenerate')}</button>
                   </div>
                   <ScheduleViewer />
                 </section>
