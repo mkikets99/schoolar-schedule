@@ -40,18 +40,19 @@ export const ProjectManager = () => {
 
   return (
     <div className="project-manager-init">
-      <h2>Schoolar Schedule</h2>
-      <p>Start by creating a new project or importing an existing one.</p>
+      <p>Welcome! Start by creating a new project or importing an existing one.</p>
       
       <form onSubmit={handleCreate} className="create-project-form">
-        <input 
-          type="text" 
-          placeholder="Enter School Name" 
-          value={schoolName}
-          onChange={(e) => setSchoolName(e.target.value)}
-          required
-        />
-        <button type="submit">Create New Project</button>
+        <div className="form-input-container">
+          <input 
+            type="text" 
+            placeholder="Enter School Name" 
+            value={schoolName}
+            onChange={(e) => setSchoolName(e.target.value)}
+            required
+          />
+        </div>
+        <button type="submit" className="primary-btn" style={{ width: '100%', marginTop: '1rem' }}>Create New Project</button>
       </form>
 
       <div className="import-project">

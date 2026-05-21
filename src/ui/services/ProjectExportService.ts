@@ -1,9 +1,49 @@
+import JSZip from 'jszip';
 import { ProjectState } from '../../shared/types';
 
-export const exportProject = (project: ProjectState) => {
-  const data = JSON.stringify(project, null, 2);
-  const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+/**
+ * Service for exporting and importing project files.
+ * Format: .schoolproj (A ZIP archive containing multiple JSON files and a manifest)
+ */
+
+export const exportProject = async (project: ProjectState) => {
+  const zip = new JSZip();
+
+  // 1. Manifest
+  const manifest = {
+    version: project.version || '1.0.0',
+    school: project.school,
+    exportedAt: new Date().toISOString(),
+    files: [
+      'academic_years.json',
+      'teachers.json',
+      'subjects.json',
+      'rooms.json',
+      'groups.json',
+      'curriculum.json',
+      'load_distribution.json',
+      'constraints.json',
+      'schedule.json'
+    ]
+  };
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+
+  // 2. Entity Files
+  zip.file('academic_years.json', JSON.stringify(project.academicYears, null, 2));
+  zip.file('teachers.json', JSON.stringify(project.teachers, null, 2));
+  zip.file('subjects.json', JSON.stringify(project.subjects, null, 2));
+  zip.file('rooms.json', JSON.stringify(project.rooms, null, 2));
+  zip.file('groups.json', JSON.stringify(project.groups, null, 2));
+  zip.file('curriculum.json', JSON.stringify(project.curriculum, null, 2));
+  zip.file('load_distribution.json', JSON.stringify(project.loadDistribution, null, 2));
+  zip.file('constraints.json', JSON.stringify(project.constraints, null, 2));
+  
+  if (project.generatedSchedule) {
+    zip.file('schedule.json', JSON.stringify(project.generatedSchedule, null, 2));
+  }
+
+  const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const url = URL.createObjectURL(content);
   
   const link = document.createElement('a');
   link.href = url;
@@ -15,18 +55,56 @@ export const exportProject = (project: ProjectState) => {
 };
 
 export const importProject = async (file: File): Promise<ProjectState> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
+  try {
+    const zip = await JSZip.loadAsync(file);
+    
+    // Load manifest first
+    const manifestFile = zip.file('manifest.json');
+    if (!manifestFile) {
+      throw new Error('Missing manifest.json');
+    }
+    const manifest = JSON.parse(await manifestFile.async('string'));
+
+    // Helper to read entity file
+    const readJson = async (filename: string, defaultValue: any = []) => {
       try {
-        const project = JSON.parse(e.target?.result as string);
-        // TODO: Add schema validation
-        resolve(project);
-      } catch (err) {
-        reject(new Error('Invalid project file format'));
+        const f = zip.file(filename);
+        if (!f) return defaultValue;
+        const content = await f.async('string');
+        const parsed = JSON.parse(content);
+        return parsed ?? defaultValue;
+      } catch (e) {
+        console.warn(`Failed to parse ${filename}, using default`, e);
+        return defaultValue;
       }
     };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsText(file);
-  });
+
+    // Reconstruct project state with defensive defaults
+    const project: ProjectState = {
+      version: manifest.version || '1.0.0',
+      school: manifest.school || { id: crypto.randomUUID(), name: 'Imported School' },
+      academicYears: await readJson('academic_years.json'),
+      teachers: await readJson('teachers.json'),
+      subjects: await readJson('subjects.json'),
+      rooms: await readJson('rooms.json'),
+      groups: await readJson('groups.json'),
+      curriculum: await readJson('curriculum.json'),
+      loadDistribution: await readJson('load_distribution.json'),
+      constraints: await readJson('constraints.json'),
+      generatedSchedule: await readJson('schedule.json', undefined)
+    };
+
+    
+    // Final check for mandatory structure in generatedSchedule
+    if (project.generatedSchedule) {
+      if (!Array.isArray(project.generatedSchedule.schedule)) project.generatedSchedule.schedule = [];
+      if (!Array.isArray(project.generatedSchedule.conflicts)) project.generatedSchedule.conflicts = [];
+      if (typeof project.generatedSchedule.score !== 'number') project.generatedSchedule.score = 0;
+    }
+    
+    return project;
+  } catch (err) {
+    console.error('Import failed:', err);
+    throw new Error('Failed to import project. Invalid .schoolproj structure.');
+  }
 };

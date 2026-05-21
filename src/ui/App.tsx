@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { ProjectManager } from './components/ProjectManager';
 import { TeacherEditor } from './components/TeacherEditor';
@@ -12,6 +13,7 @@ import { exportProject } from './services/ProjectExportService';
 import './index.css';
 
 function AppContent() {
+  const { t, i18n } = useTranslation();
   const { project, isLoading, updateGeneratedSchedule } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>('Initializing...');
   const workerRef = useRef<Worker | null>(null);
@@ -55,20 +57,27 @@ function AppContent() {
 
   const handleReset = () => {
     if (confirm('Are you sure you want to delete the current project? All unsaved data will be lost.')) {
-      // Clear IndexedDB
       indexedDB.deleteDatabase('SchoolarScheduleDB');
       window.location.reload(); 
     }
   };
 
   if (isLoading) {
-    return <div className="loading">Loading project...</div>;
+    return (
+      <div className="loading-screen">
+        <div className="loader"></div>
+        <p>Initializing Workspace...</p>
+      </div>
+    );
   }
 
   return (
     <div className="app-container">
       <header>
-        <ProjectManager />
+        <div className="header-brand">
+          <h1>{t('app_title')}</h1>
+          {project && <span className="project-badge">{project.school.name}</span>}
+        </div>
         <div className="status-bar">
           <span>Worker: {workerStatus}</span>
         </div>
@@ -76,83 +85,75 @@ function AppContent() {
       
       <main>
         {!project ? (
-          <ProjectManager />
+          <div className="onboarding">
+            <ProjectManager />
+          </div>
         ) : (
           <div className="workspace">
             <nav className="side-nav">
               <div className="nav-group">
-                <button className={currentView === 'dashboard' ? 'active' : ''} onClick={() => setCurrentView('dashboard')}>Dashboard</button>
-                <button className={currentView === 'teachers' ? 'active' : ''} onClick={() => setCurrentView('teachers')}>Teachers</button>
-                <button className={currentView === 'subjects' ? 'active' : ''} onClick={() => setCurrentView('subjects')}>Subjects</button>
-                <button className={currentView === 'rooms' ? 'active' : ''} onClick={() => setCurrentView('rooms')}>Rooms</button>
-                <button className={currentView === 'groups' ? 'active' : ''} onClick={() => setCurrentView('groups')}>Groups</button>
-                <button className={currentView === 'curriculum' ? 'active' : ''} onClick={() => setCurrentView('curriculum')}>Curriculum</button>
-                <button className={currentView === 'load' ? 'active' : ''} onClick={() => setCurrentView('load')}>Load Distribution</button>
-                <button className={currentView === 'schedule' ? 'active' : ''} onClick={() => setCurrentView('schedule')}>Schedule</button>
+                <button className={currentView === 'dashboard' ? 'active' : ''} onClick={() => setCurrentView('dashboard')}>{t('dashboard')}</button>
+                <button className={currentView === 'teachers' ? 'active' : ''} onClick={() => setCurrentView('teachers')}>{t('teachers')}</button>
+                <button className={currentView === 'subjects' ? 'active' : ''} onClick={() => setCurrentView('subjects')}>{t('subjects')}</button>
+                <button className={currentView === 'rooms' ? 'active' : ''} onClick={() => setCurrentView('rooms')}>{t('rooms')}</button>
+                <button className={currentView === 'groups' ? 'active' : ''} onClick={() => setCurrentView('groups')}>{t('groups')}</button>
+                <button className={currentView === 'curriculum' ? 'active' : ''} onClick={() => setCurrentView('curriculum')}>{t('curriculum')}</button>
+                <button className={currentView === 'load' ? 'active' : ''} onClick={() => setCurrentView('load')}>{t('load_distribution')}</button>
+                <button className={currentView === 'schedule' ? 'active' : ''} onClick={() => setCurrentView('schedule')}>{t('schedule')}</button>
               </div>
 
               <div className="nav-footer">
                 <button onClick={() => exportProject(project)}>Export .schoolproj</button>
-                <button onClick={handleReset} className="reset-btn">New / Reset</button>
+                <button onClick={handleReset} className="reset-btn">{t('cancel')} / Reset</button>
+                <div style={{ padding: '1rem', display: 'flex', gap: '0.5rem' }}>
+                  <button onClick={() => i18n.changeLanguage('en')} style={{ background: i18n.language === 'en' ? '#333' : 'transparent', color: '#fff', border: '1px solid #444', borderRadius: '4px', padding: '0.2rem 0.5rem' }}>EN</button>
+                  <button onClick={() => i18n.changeLanguage('uk')} style={{ background: i18n.language === 'uk' ? '#333' : 'transparent', color: '#fff', border: '1px solid #444', borderRadius: '4px', padding: '0.2rem 0.5rem' }}>UK</button>
+                </div>
               </div>
             </nav>
 
             <div className="view-container">
               {currentView === 'dashboard' && (
                 <section className="dashboard">
-                  <h2>Dashboard</h2>
-                  <p>Welcome to {project.school.name} scheduling workspace.</p>
-                  <div className="stats">
-                    <div>Teachers: {project.teachers.length}</div>
-                    <div>Groups: {project.groups.length}</div>
-                    <div>Subjects: {project.subjects.length}</div>
-                    <div>Hours Assigned: {project.generatedSchedule?.schedule.length || 0}</div>
+                  <div className="dashboard-hero">
+                    <h2>Welcome to {project.school.name}</h2>
+                    <p>Your scheduling environment is ready.</p>
+                  </div>
+                  
+                  <div className="dashboard-grid">
+                    <div className="stat-card">
+                      <h3>Structure</h3>
+                      <div className="stats-list">
+                        <div className="stat-item">Teachers: <strong>{project.teachers?.length || 0}</strong></div>
+                        <div className="stat-item">Subjects: <strong>{project.subjects?.length || 0}</strong></div>
+                        <div className="stat-item">Groups: <strong>{project.groups?.length || 0}</strong></div>
+                        <div className="stat-item">Rooms: <strong>{project.rooms?.length || 0}</strong></div>
+                      </div>
+                      <button onClick={() => setCurrentView('teachers')} className="card-action">Manage Structure</button>
+                    </div>
+
+                    <div className="stat-card primary">
+                      <h3>Scheduling</h3>
+                      <div className="stats-list">
+                        <div className="stat-item">Curriculum Rules: <strong>{project.curriculum?.length || 0}</strong></div>
+                        <div className="stat-item">Hours Assigned: <strong>{project.generatedSchedule?.schedule?.length || 0}</strong></div>
+                      </div>
+                      <button onClick={() => setCurrentView('schedule')} className="card-action">Go to Scheduling</button>
+                    </div>
                   </div>
                 </section>
               )}
-              {currentView === 'teachers' && (
-                <section className="editor-view">
-                  <h2>Teachers</h2>
-                  <TeacherEditor />
-                </section>
-              )}
-              {currentView === 'subjects' && (
-                <section className="editor-view">
-                  <h2>Subjects</h2>
-                  <SubjectEditor />
-                </section>
-              )}
-              {currentView === 'rooms' && (
-                <section className="editor-view">
-                  <h2>Rooms</h2>
-                  <RoomEditor />
-                </section>
-              )}
-              {currentView === 'groups' && (
-                <section className="editor-view">
-                  <h2>Groups</h2>
-                  <GroupEditor />
-                </section>
-              )}
-              {currentView === 'curriculum' && (
-                <section className="editor-view">
-                  <h2>Curriculum</h2>
-                  <CurriculumEditor />
-                </section>
-              )}
-              {currentView === 'load' && (
-                <section className="editor-view">
-                  <h2>Load Distribution</h2>
-                  <LoadDistributionUI />
-                </section>
-              )}
+              {currentView === 'teachers' && <section className="editor-view"><h2>{t('teachers')}</h2><TeacherEditor /></section>}
+              {currentView === 'subjects' && <section className="editor-view"><h2>{t('subjects')}</h2><SubjectEditor /></section>}
+              {currentView === 'rooms' && <section className="editor-view"><h2>{t('rooms')}</h2><RoomEditor /></section>}
+              {currentView === 'groups' && <section className="editor-view"><h2>{t('groups')}</h2><GroupEditor /></section>}
+              {currentView === 'curriculum' && <section className="editor-view"><h2>{t('curriculum')}</h2><CurriculumEditor /></section>}
+              {currentView === 'load' && <section className="editor-view"><h2>{t('load_distribution')}</h2><LoadDistributionUI /></section>}
               {currentView === 'schedule' && (
                 <section className="schedule-view">
                   <div className="view-header">
-                    <h2>Schedule</h2>
-                    <button onClick={handleGenerateSchedule} className="generate-btn-small">
-                      Regenerate
-                    </button>
+                    <h2>{t('schedule')}</h2>
+                    <button onClick={handleGenerateSchedule} className="generate-btn-small">Regenerate</button>
                   </div>
                   <ScheduleViewer />
                 </section>

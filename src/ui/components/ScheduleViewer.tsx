@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
-import { Lesson } from '../../shared/types';
 
 export const ScheduleViewer = () => {
   const { project } = useProject();

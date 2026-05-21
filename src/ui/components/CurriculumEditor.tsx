@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CurriculumRule } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
+import { Modal, FormField } from './Modal';
 
 export const CurriculumEditor = () => {
   const { project, updateCurriculum } = useProject();
@@ -10,26 +11,36 @@ export const CurriculumEditor = () => {
   const teachers = project?.teachers || [];
   const rooms = project?.rooms || [];
 
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [hours, setHours] = useState(1);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newItem, setNewItem] = useState({ 
+    groupId: '', 
+    subjectId: '', 
+    hours: 1,
+    teacherId: '',
+    roomId: ''
+  });
 
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedGroupId || !selectedSubjectId) return;
+  const handleAdd = () => {
+    if (!newItem.groupId || !newItem.subjectId) return;
 
-    const newItem: CurriculumRule = {
+    const rule: CurriculumRule = {
       id: crypto.randomUUID(),
-      groupId: selectedGroupId,
-      subjectId: selectedSubjectId,
-      hoursPerWeek: hours,
+      groupId: newItem.groupId,
+      subjectId: newItem.subjectId,
+      hoursPerWeek: newItem.hours,
+      teacherId: newItem.teacherId || undefined,
+      roomId: newItem.roomId || undefined
     };
 
-    updateCurriculum([...curriculum, newItem]);
+    updateCurriculum([...curriculum, rule]);
+    setNewItem({ groupId: '', subjectId: '', hours: 1, teacherId: '', roomId: '' });
+    setIsModalOpen(false);
   };
 
   const handleRemove = (id: string) => {
-    updateCurriculum(curriculum.filter(t => t.id !== id));
+    if (confirm('Are you sure you want to delete this curriculum rule?')) {
+      updateCurriculum(curriculum.filter(t => t.id !== id));
+    }
   };
 
   const handleUpdate = (id: string, updates: Partial<CurriculumRule>) => {
@@ -41,35 +52,66 @@ export const CurriculumEditor = () => {
 
   return (
     <div className="entity-editor">
-      <form onSubmit={handleAdd} className="add-form">
-        <select value={selectedGroupId} onChange={(e) => setSelectedGroupId(e.target.value)} required>
-          <option value="">Select Group</option>
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <select value={selectedSubjectId} onChange={(e) => setSelectedSubjectId(e.target.value)} required>
-          <option value="">Select Subject</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <input 
-          type="number" 
-          value={hours} 
-          onChange={(e) => setHours(parseFloat(e.target.value) || 1)}
-          min="0.5"
-          step="0.5"
-          style={{ width: '80px' }}
-        />
-        <button type="submit">Add Rule</button>
-      </form>
+      <div className="view-header">
+        <h2>Curriculum</h2>
+        <button onClick={() => setIsModalOpen(true)} className="primary-btn">Add Curriculum Rule</button>
+      </div>
+
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title="Add Curriculum Rule"
+        actions={
+          <>
+            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">Cancel</button>
+            <button onClick={handleAdd} className="primary-btn">Add Rule</button>
+          </>
+        }
+      >
+        <FormField label="Target Group">
+          <select value={newItem.groupId} onChange={(e) => setNewItem({ ...newItem, groupId: e.target.value })}>
+            <option value="">Select Group...</option>
+            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Subject">
+          <select value={newItem.subjectId} onChange={(e) => setNewItem({ ...newItem, subjectId: e.target.value })}>
+            <option value="">Select Subject...</option>
+            {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Hours Per Week">
+          <input 
+            type="number" 
+            value={newItem.hours} 
+            onChange={(e) => setNewItem({ ...newItem, hours: parseFloat(e.target.value) || 1 })}
+            min="0.5"
+            step="0.5"
+          />
+        </FormField>
+        <FormField label="Assign Teacher (Optional)">
+          <select value={newItem.teacherId} onChange={(e) => setNewItem({ ...newItem, teacherId: e.target.value })}>
+            <option value="">No Teacher assigned</option>
+            {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Preferred Room (Optional)">
+          <select value={newItem.roomId} onChange={(e) => setNewItem({ ...newItem, roomId: e.target.value })}>
+            <option value="">No Room preferred</option>
+            {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </FormField>
+      </Modal>
 
       <table className="editor-table">
         <thead>
           <tr>
             <th>Group</th>
             <th>Subject</th>
-            <th>Hours/Week</th>
-            <th>Default Teacher</th>
-            <th>Default Room</th>
-            <th>Actions</th>
+            <th style={{ width: '100px' }}>Hrs/Wk</th>
+            <th>Teacher</th>
+            <th>Room</th>
+            <th style={{ width: '100px' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -109,6 +151,11 @@ export const CurriculumEditor = () => {
               </td>
             </tr>
           ))}
+          {curriculum.length === 0 && (
+            <tr>
+              <td colSpan={6} className="empty-row">No curriculum rules defined yet.</td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
