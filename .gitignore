@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 
 GEMINI.md
+src/locales/*
+!src/locales/en
+!src/locales/en/translation.json
