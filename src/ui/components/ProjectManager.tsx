@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useProject } from '../context/ProjectContext';
 import { importProject } from '../services/ProjectExportService';
 
 export const ProjectManager = () => {
+  const { t } = useTranslation();
   const { project, createNewProject, setProject } = useProject();
   const [schoolName, setSchoolName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,7 +42,7 @@ export const ProjectManager = () => {
 
   return (
     <div className="project-manager-init">
-      <p>Welcome! Start by creating a new project or importing an existing one.</p>
+      <p>{t('welcome_to')}! {t('create_new_project')}...</p>
       
       <form onSubmit={handleCreate} className="create-project-form">
         <div className="form-input-container">
@@ -52,13 +54,13 @@ export const ProjectManager = () => {
             required
           />
         </div>
-        <button type="submit" className="primary-btn" style={{ width: '100%', marginTop: '1rem' }}>Create New Project</button>
+        <button type="submit" className="primary-btn" style={{ width: '100%', marginTop: '1rem' }}>{t('create_new_project')}</button>
       </form>
 
       <div className="import-project">
-        <div className="divider">OR</div>
+        <div className="divider">{t('or')}</div>
         <button onClick={handleImportClick} className="import-btn">
-          Import .schoolproj File
+          {t('import_schoolproj')}
         </button>
         <input 
           type="file" 
