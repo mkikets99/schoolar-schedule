@@ -1,0 +1,10 @@
+# Crowdin Configuration for Schoolar Schedule
+# Learn more at: https://support.crowdin.com/configuration-file/
+
+project_id_env: CROWDIN_PROJECT_ID
+api_token_env: CROWDIN_API_TOKEN
+
+files:
+  - source: /src/locales/en/translation.json
+    translation: /src/locales/%two_letters_code%/translation.json
+    type: json
