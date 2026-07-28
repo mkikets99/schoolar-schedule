@@ -198,23 +198,18 @@ for (const group of groups) {
 
     const splitFromGrade = subjId === 's-info' ? 2 : subjId === 's-tech' ? 7 : 99;
     if (splitSubjects.includes(subjId) && hours > 0 && group.grade >= splitFromGrade) {
-      const numGroups = randInt(2, 3);
-
-      for (let sg = 0; sg < numGroups; sg++) {
+      for (let sg = 0; sg < 2; sg++) {
         const subgroupId = `${group.id}-${subjId}-${sg + 1}`;
         subgroups.push(subgroupId);
 
         const teacher = getTeacher(subjId);
-        const isSmall = true;
-        const room = isSmall
-          ? rooms.filter(r => r.types.includes(subjId === 's-info' ? 'computer-lab' : 'workshop'))[roomDistIdx % 3]
-          : getRoomFor(subjId, group.id, true);
+        const room = rooms.filter(r => r.types.includes(subjId === 's-info' ? 'computer-lab' : 'workshop'))[roomDistIdx % 3];
 
         curriculum.push({
           id: `cr-${String(++ruleIdx).padStart(3, '0')}`,
           groupId: group.id,
           subjectId: subjId,
-          hoursPerWeek: Math.ceil(hours / numGroups),
+          hoursPerWeek: hours,
           teacherId: teacher.id,
           roomId: room.id,
         });

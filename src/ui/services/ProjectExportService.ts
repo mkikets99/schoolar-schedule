@@ -91,12 +91,12 @@ export const importProject = async (file: File): Promise<ProjectState> => {
       curriculum: await readJson('curriculum.json'),
       loadDistribution: await readJson('load_distribution.json'),
       constraints: await readJson('constraints.json'),
-      generatedSchedule: await readJson('schedule.json', undefined)
+      generatedSchedule: await readJson('schedule.json', null)
     };
 
     
     // Final check for mandatory structure in generatedSchedule
-    if (project.generatedSchedule) {
+    if (project.generatedSchedule && !Array.isArray(project.generatedSchedule)) {
       if (!Array.isArray(project.generatedSchedule.schedule)) project.generatedSchedule.schedule = [];
       if (!Array.isArray(project.generatedSchedule.conflicts)) project.generatedSchedule.conflicts = [];
       if (typeof project.generatedSchedule.score !== 'number') project.generatedSchedule.score = 0;
