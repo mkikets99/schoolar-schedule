@@ -144,13 +144,12 @@
   "assigned": "Призначено",
   "group": "Група",
   "subject": "Предмет",
-  "save_snapshot": "Зберегти знімок",
-  "snapshots": "Знімки",
-  "restore": "Відновити",
-  "no_snapshots": "Знімків ще немає.",
-  "confirm_restore_snapshot": "Відновити цей знімок? Поточні дані буде замінено.",
   "export": "Експорт",
   "optional": "Необов'язково",
   "subgroups_count": "{{count}} підгруп",
-  "legend": "Легенда"
+  "legend": "Легенда",
+  "all": "Всі",
+  "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут.",
+  "needed": "Потрібно",
+  "score": "Оцінка"
 }
