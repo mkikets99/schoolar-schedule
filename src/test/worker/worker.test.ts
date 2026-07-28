@@ -114,13 +114,23 @@ async function generateTestSchedule(project: ProjectState) {
     dailyCounts.set(gid, days.map(() => 0));
   }
 
+  function shuffle<T>(arr: T[]): T[] {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
   units.sort((a, b) => {
     const ta = batchCounts.get(a.groupId) || 0;
     const tb = batchCounts.get(b.groupId) || 0;
     if (ta !== tb) return tb - ta;
     const aa = a.lessons[0]?.teacherId || '';
     const ab = b.lessons[0]?.teacherId || '';
-    return aa.localeCompare(ab);
+    if (aa !== ab) return aa.localeCompare(ab);
+    return Math.random() - 0.5;
   });
 
   const schedule: any[] = [];
@@ -237,7 +247,7 @@ async function generateTestSchedule(project: ProjectState) {
         ordered.add(p);
       }
     }
-    for (const p of allPeriods) {
+    for (const p of shuffle(allPeriods)) {
       ordered.add(p);
     }
     return [...ordered];

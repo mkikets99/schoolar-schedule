@@ -44,9 +44,14 @@ export const ScheduleViewer = () => {
 
       if (!groupSlot.has(lesson.groupId)) groupSlot.set(lesson.groupId, new Map());
       if (!groupSlot.get(lesson.groupId)!.has(slotKey)) groupSlot.get(lesson.groupId)!.set(slotKey, []);
-      groupSlot.get(lesson.groupId)!.get(slotKey)!.push(lesson.id);
-      if (groupSlot.get(lesson.groupId)!.get(slotKey)!.length > 1) {
-        for (const lid of groupSlot.get(lesson.groupId)!.get(slotKey)!) keys.add(lid);
+      const slotLessons = groupSlot.get(lesson.groupId)!.get(slotKey)!;
+      const isSameSubjectSplit = slotLessons.length > 0 && slotLessons.some(lid => {
+        const other = schedule.find(l => l.id === lid);
+        return other && other.subjectId === lesson.subjectId;
+      });
+      slotLessons.push(lesson.id);
+      if (slotLessons.length > 1 && !isSameSubjectSplit) {
+        for (const lid of slotLessons) keys.add(lid);
       }
     }
     return keys;
