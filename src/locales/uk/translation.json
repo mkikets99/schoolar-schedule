@@ -83,6 +83,7 @@
   "import_failed": "Помилка імпорту: {{error}}",
   "view_group": "Група",
   "view_teacher": "Вчитель",
+  "view_subject": "Предмет",
   "select_view": "Виберіть {{type}} для перегляду",
   "period": "Період",
   "no_selection": "Виберіть {{type}} для перегляду розкладу.",
@@ -151,5 +152,10 @@
   "all": "Всі",
   "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут.",
   "needed": "Потрібно",
-  "score": "Оцінка"
+  "score": "Оцінка",
+  "split_into_subgroups": "Розділити на підгрупи",
+  "subgroup_count": "Кількість підгруп",
+  "subgroup_n": "Підгрупа {{n}}",
+  "split": "Розділ",
+  "add_split_rule": "Додати розділене правило"
 }
