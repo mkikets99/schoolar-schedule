@@ -854,6 +854,44 @@ tr.unassigned {
   min-height: 60px;
 }
 
+.schedule-stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  background-color: #1e1e1e;
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  border: 1px solid #333;
+}
+
+.stat-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+
+.stat-block .stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: #888;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.stat-block .stat-value {
+  font-size: 1.4rem;
+  font-weight: bold;
+}
+
+.stat-block.warn .stat-value { color: #ff4d4d; }
+.stat-block.ok .stat-value { color: #4CAF50; }
+.stat-block.mid .stat-value { color: #FFC107; }
+.stat-block.needed .stat-value { color: #888; }
+.stat-block.assigned .stat-value { color: #64B5F6; }
+
 .constraint-inspector .no-conflicts {
   text-align: center;
   padding: 3rem;

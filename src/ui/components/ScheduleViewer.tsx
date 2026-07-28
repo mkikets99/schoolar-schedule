@@ -11,6 +11,13 @@ export const ScheduleViewer = () => {
   const subjects = project?.subjects || [];
   const rooms = project?.rooms || [];
 
+  const neededHours = useMemo(() =>
+    (project?.curriculum || []).reduce((s, r) => s + r.hoursPerWeek, 0),
+    [project]);
+  const assignedHours = schedule.length;
+  const unassignedHours = neededHours - assignedHours;
+  const score = project?.generatedSchedule?.score ?? 0;
+
   const [filterType, setFilterType] = useState<'group' | 'teacher' | 'all'>('all');
   const [filterId, setFilterId] = useState<string>('');
   const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
@@ -100,6 +107,29 @@ export const ScheduleViewer = () => {
             {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
           </div>
         )}
+      </div>
+
+      <div className="schedule-stats">
+        <div className="stat-block needed">
+          <span className="stat-label">{t('needed')}</span>
+          <span className="stat-value">{neededHours}</span>
+        </div>
+        <div className="stat-block assigned">
+          <span className="stat-label">{t('assigned')}</span>
+          <span className="stat-value">{assignedHours}</span>
+        </div>
+        <div className={`stat-block unassigned ${unassignedHours > 0 ? 'warn' : 'ok'}`}>
+          <span className="stat-label">{t('unassigned')}</span>
+          <span className="stat-value">{unassignedHours}</span>
+        </div>
+        <div className={`stat-block conflicts ${conflictKeys.size > 0 ? 'warn' : 'ok'}`}>
+          <span className="stat-label">{t('conflicts')}</span>
+          <span className="stat-value">{conflictKeys.size}</span>
+        </div>
+        <div className={`stat-block score ${score >= 1 ? 'ok' : score >= 0.5 ? 'mid' : 'warn'}`}>
+          <span className="stat-label">{t('score')}</span>
+          <span className="stat-value">{(score * 100).toFixed(0)}%</span>
+        </div>
       </div>
 
       {schedule.length === 0 ? (

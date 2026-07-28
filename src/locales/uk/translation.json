@@ -145,5 +145,7 @@
   "subgroups_count": "{{count}} підгруп",
   "legend": "Легенда",
   "all": "Всі",
-  "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут."
+  "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут.",
+  "needed": "Потрібно",
+  "score": "Оцінка"
 }

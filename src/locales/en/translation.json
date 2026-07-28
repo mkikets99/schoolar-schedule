@@ -149,5 +149,7 @@
   "subgroups_count": "{{count}} subgroups",
   "legend": "Legend",
   "all": "All",
-  "generate_schedule_first": "Generate a schedule to view it here."
+  "generate_schedule_first": "Generate a schedule to view it here.",
+  "needed": "Needed",
+  "score": "Score"
 }
