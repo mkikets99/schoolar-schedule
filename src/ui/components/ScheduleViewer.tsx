@@ -94,7 +94,21 @@ export const ScheduleViewer = () => {
         </select>
       </div>
 
-      {!filterId ? (
+      {!filterId && schedule.length > 0 ? (
+        <div className="schedule-overview">
+          <div className="summary-cards">
+            <div className="stat-card small">
+              <h3>{t('lessons_assigned')}</h3>
+              <div className="stat-value" style={{ fontSize: '1.5rem' }}>{schedule.length}</div>
+            </div>
+            <div className="stat-card small">
+              <h3>{t('conflicts')}</h3>
+              <div className="stat-value" style={{ fontSize: '1.5rem', color: conflictKeys.size > 0 ? '#ff4d4d' : '#4CAF50' }}>{conflictKeys.size}</div>
+            </div>
+          </div>
+          <p style={{ color: '#888', textAlign: 'center' }}>{t('no_selection', { type: filterType })}</p>
+        </div>
+      ) : !filterId ? (
         <div className="no-selection">{t('no_selection', { type: filterType })}</div>
       ) : (
         <div className="schedule-grid-container">

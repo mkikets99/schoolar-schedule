@@ -71,63 +71,43 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateSchool = (school: School) => {
-    if (project) {
-      setProject({ ...project, school });
-    }
+    setProject(prev => prev ? { ...prev, school } : prev);
   };
 
   const updateAcademicYears = (academicYears: AcademicYear[]) => {
-    if (project) {
-      setProject({ ...project, academicYears });
-    }
+    setProject(prev => prev ? { ...prev, academicYears } : prev);
   };
 
   const updateTeachers = (teachers: Teacher[]) => {
-    if (project) {
-      setProject({ ...project, teachers });
-    }
+    setProject(prev => prev ? { ...prev, teachers } : prev);
   };
 
   const updateSubjects = (subjects: Subject[]) => {
-    if (project) {
-      setProject({ ...project, subjects });
-    }
+    setProject(prev => prev ? { ...prev, subjects } : prev);
   };
 
   const updateRooms = (rooms: Room[]) => {
-    if (project) {
-      setProject({ ...project, rooms });
-    }
+    setProject(prev => prev ? { ...prev, rooms } : prev);
   };
 
   const updateGroups = (groups: Group[]) => {
-    if (project) {
-      setProject({ ...project, groups });
-    }
+    setProject(prev => prev ? { ...prev, groups } : prev);
   };
 
   const updateCurriculum = (curriculum: CurriculumRule[]) => {
-    if (project) {
-      setProject({ ...project, curriculum });
-    }
+    setProject(prev => prev ? { ...prev, curriculum } : prev);
   };
 
   const updateLoadDistribution = (load: LoadDistribution[]) => {
-    if (project) {
-      setProject({ ...project, loadDistribution: load });
-    }
+    setProject(prev => prev ? { ...prev, loadDistribution: load } : prev);
   };
 
   const updateConstraints = (constraints: Constraint[]) => {
-    if (project) {
-      setProject({ ...project, constraints });
-    }
+    setProject(prev => prev ? { ...prev, constraints } : prev);
   };
 
   const updateGeneratedSchedule = (generatedSchedule: ScheduleResult) => {
-    if (project) {
-      setProject({ ...project, generatedSchedule });
-    }
+    setProject(prev => prev ? { ...prev, generatedSchedule } : prev);
   };
 
   return (
