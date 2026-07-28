@@ -147,5 +147,10 @@
   "all": "Всі",
   "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут.",
   "needed": "Потрібно",
-  "score": "Оцінка"
+  "score": "Оцінка",
+  "split_into_subgroups": "Розділити на підгрупи",
+  "subgroup_count": "Кількість підгруп",
+  "subgroup_n": "Підгрупа {{n}}",
+  "split": "Розділ",
+  "add_split_rule": "Додати розділене правило"
 }

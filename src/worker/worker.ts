@@ -20,6 +20,7 @@ self.onmessage = (event) => {
 async function generateSchedule(project: ProjectState) {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const maxPeriod = 8;
+  const allRooms = project.rooms || [];
 
   self.postMessage({ type: 'PROGRESS', payload: { progress: 2 } });
 
@@ -69,10 +70,12 @@ async function generateSchedule(project: ProjectState) {
   }
 
   lessons.sort((a, b) => {
+    const ga = dailyTargets.get(a.groupId)!.reduce((s, v) => s + v, 0);
+    const gb = dailyTargets.get(b.groupId)!.reduce((s, v) => s + v, 0);
+    if (ga !== gb) return gb - ga;
     const ta = a.teacherId || '';
     const tb = b.teacherId || '';
-    if (ta !== tb) return ta.localeCompare(tb);
-    return a.groupId.localeCompare(b.groupId);
+    return ta.localeCompare(tb);
   });
 
   const schedule: any[] = [];
@@ -82,96 +85,81 @@ async function generateSchedule(project: ProjectState) {
 
   self.postMessage({ type: 'PROGRESS', payload: { progress: 5 } });
 
+  function tryAssign(lesson: typeof lessons[0], day: string, period: number): boolean {
+    const slotKey = `${day}-${period}`;
+    if (groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
+    if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
+
+    let roomId = lesson.roomId;
+    if (roomId && roomBusy.has(`${roomId}-${slotKey}`)) {
+      const alt = allRooms.find(r => r.capacity !== undefined && !roomBusy.has(`${r.id}-${slotKey}`));
+      if (alt) roomId = alt.id;
+      else return false;
+    }
+
+    schedule.push({
+      id: lesson.id,
+      ruleId: lesson.ruleId,
+      groupId: lesson.groupId,
+      subjectId: lesson.subjectId,
+      teacherId: lesson.teacherId,
+      roomId,
+      day,
+      period,
+    });
+
+    groupBusy.add(`${lesson.groupId}-${slotKey}`);
+    if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
+    roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
+
+    const di = days.indexOf(day);
+    if (di >= 0) dailyCounts.get(lesson.groupId)![di]++;
+    lessonsAssigned++;
+    return true;
+  }
+
   for (const lesson of lessons) {
     const targets = dailyTargets.get(lesson.groupId)!;
     const counts = dailyCounts.get(lesson.groupId)!;
-
-    const dayScores = days.map((day, di) => {
-      let score = targets[di] - counts[di];
-      if (lesson.teacherId) {
-        for (let p = 1; p <= maxPeriod; p++) {
-          if (teacherBusy.has(`${lesson.teacherId}-${day}-${p}`)) score += 0.5;
-        }
-      }
-      return { day, index: di, score };
-    });
-
-    dayScores.sort((a, b) => b.score - a.score);
-
     let assigned = false;
+
+    const dayScores = days.map((day, di) => ({
+      day,
+      index: di,
+      need: targets[di] - counts[di],
+    }));
+
+    dayScores.sort((a, b) => b.need - a.need);
 
     for (const ds of dayScores) {
       if (assigned) break;
-
-      const periodScores: { period: number; score: number }[] = [];
-
-      for (let p = 1; p <= maxPeriod; p++) {
-        const slotKey = `${ds.day}-${p}`;
-        if (groupBusy.has(`${lesson.groupId}-${slotKey}`)) continue;
-        if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) continue;
-        if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) continue;
-
-        let score = 0;
-        if (lesson.teacherId) {
-          if (teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p - 1}`)) score += 10;
-          if (teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p + 1}`)) score += 10;
+      if (ds.need <= 0) {
+        for (let p = 1; p <= maxPeriod; p++) {
+          if (tryAssign(lesson, ds.day, p)) { assigned = true; break; }
         }
-
-        periodScores.push({ period: p, score });
+      } else {
+        for (let p = 1; p <= maxPeriod; p++) {
+          if (lesson.teacherId) {
+            const prevBusy = teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p - 1}`);
+            const nextBusy = teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p + 1}`);
+            if (prevBusy || nextBusy) {
+              if (tryAssign(lesson, ds.day, p)) { assigned = true; break; }
+            }
+          }
+        }
+        if (!assigned) {
+          for (let p = 1; p <= maxPeriod; p++) {
+            if (tryAssign(lesson, ds.day, p)) { assigned = true; break; }
+          }
+        }
       }
-
-      if (periodScores.length === 0) continue;
-
-      periodScores.sort((a, b) => b.score - a.score);
-      const best = periodScores[0];
-
-      schedule.push({
-        id: lesson.id,
-        ruleId: lesson.ruleId,
-        groupId: lesson.groupId,
-        subjectId: lesson.subjectId,
-        teacherId: lesson.teacherId,
-        roomId: lesson.roomId,
-        day: ds.day,
-        period: best.period,
-      });
-
-      const slotKey = `${ds.day}-${best.period}`;
-      groupBusy.add(`${lesson.groupId}-${slotKey}`);
-      if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
-      if (lesson.roomId) roomBusy.add(`${lesson.roomId}-${slotKey}`);
-
-      counts[ds.index]++;
-      lessonsAssigned++;
-      assigned = true;
     }
 
     if (!assigned) {
       for (const day of days) {
         if (assigned) break;
         for (let p = 1; p <= maxPeriod; p++) {
-          const slotKey = `${day}-${p}`;
-          if (groupBusy.has(`${lesson.groupId}-${slotKey}`)) continue;
-          if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) continue;
-          if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) continue;
-
-          schedule.push({
-            id: lesson.id,
-            ruleId: lesson.ruleId,
-            groupId: lesson.groupId,
-            subjectId: lesson.subjectId,
-            teacherId: lesson.teacherId,
-            roomId: lesson.roomId,
-            day,
-            period: p,
-          });
-
-          groupBusy.add(`${lesson.groupId}-${slotKey}`);
-          if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
-          if (lesson.roomId) roomBusy.add(`${lesson.roomId}-${slotKey}`);
-          lessonsAssigned++;
-          assigned = true;
-          break;
+          if (tryAssign(lesson, day, p)) { assigned = true; break; }
         }
       }
     }
@@ -184,8 +172,8 @@ async function generateSchedule(project: ProjectState) {
       });
     }
 
-    const progress = 5 + Math.floor((lessonsAssigned / totalLessons) * 90);
-    if (lessonsAssigned % 2 === 0 || lessonsAssigned === totalLessons) {
+    if (lessonsAssigned % 5 === 0 || lessonsAssigned === totalLessons || !assigned) {
+      const progress = 5 + Math.floor((lessonsAssigned / totalLessons) * 90);
       self.postMessage({ type: 'PROGRESS', payload: { progress } });
     }
   }

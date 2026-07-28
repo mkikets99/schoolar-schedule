@@ -151,5 +151,10 @@
   "all": "All",
   "generate_schedule_first": "Generate a schedule to view it here.",
   "needed": "Needed",
-  "score": "Score"
+  "score": "Score",
+  "split_into_subgroups": "Split into subgroups",
+  "subgroup_count": "Number of subgroups",
+  "subgroup_n": "Subgroup {{n}}",
+  "split": "Split",
+  "add_split_rule": "Add Split Rule"
 }
