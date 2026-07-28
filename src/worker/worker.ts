@@ -1,15 +1,10 @@
 import { ProjectState } from '../shared/types';
 
-/**
- * Scheduling Engine Web Worker
- */
-
 self.onmessage = (event) => {
   const { type, payload } = event.data;
 
   switch (type) {
     case 'INIT':
-      console.log('Worker: Initializing...');
       self.postMessage({ type: 'READY' });
       break;
 
@@ -23,100 +18,189 @@ self.onmessage = (event) => {
 };
 
 async function generateSchedule(project: ProjectState) {
-  console.log('Worker: Generating schedule...', project);
-  
-  self.postMessage({ type: 'PROGRESS', payload: { progress: 5 } });
-  
-  // Phase 1: Initialization
-  const timeSlots = buildTimeSlots();
-  const schedule: any[] = [];
-  const conflicts: any[] = [];
-  
-  // Track availability
-  const teacherBusy = new Set<string>(); // "teacherId-day-period"
-  const groupBusy = new Set<string>();   // "groupId-day-period"
-  const roomBusy = new Set<string>();    // "roomId-day-period"
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const maxPeriod = 8;
 
-  self.postMessage({ type: 'PROGRESS', payload: { progress: 10 } });
+  self.postMessage({ type: 'PROGRESS', payload: { progress: 2 } });
 
-  // Phase 2: Base Assignment
-  let lessonsAssigned = 0;
-  const totalHours = project.curriculum.reduce((sum, r) => sum + r.hoursPerWeek, 0);
+  const teacherBusy = new Set<string>();
+  const groupBusy = new Set<string>();
+  const roomBusy = new Set<string>();
+
+  const byGroup = new Map<string, typeof project.curriculum>();
+  for (const rule of project.curriculum) {
+    if (!byGroup.has(rule.groupId)) byGroup.set(rule.groupId, []);
+    byGroup.get(rule.groupId)!.push(rule);
+  }
+
+  const dailyTargets = new Map<string, number[]>();
+  for (const [gid, rules] of byGroup) {
+    const total = rules.reduce((s, r) => s + r.hoursPerWeek, 0);
+    const targets = days.map(() => 0);
+    for (let h = 0; h < total; h++) targets[h % 5]++;
+    dailyTargets.set(gid, targets);
+  }
+
+  const dailyCounts = new Map<string, number[]>();
+  for (const gid of byGroup.keys()) {
+    dailyCounts.set(gid, days.map(() => 0));
+  }
+
+  const lessons: Array<{
+    id: string;
+    ruleId: string;
+    groupId: string;
+    subjectId: string;
+    teacherId?: string;
+    roomId?: string;
+  }> = [];
 
   for (const rule of project.curriculum) {
-    const hoursNeeded = rule.hoursPerWeek;
-    let hoursAssigned = 0;
+    for (let h = 0; h < rule.hoursPerWeek; h++) {
+      lessons.push({
+        id: crypto.randomUUID(),
+        ruleId: rule.id,
+        groupId: rule.groupId,
+        subjectId: rule.subjectId,
+        teacherId: rule.teacherId,
+        roomId: rule.roomId,
+      });
+    }
+  }
 
-    // Try to find slots for each hour
-    for (const slot of timeSlots) {
-      if (hoursAssigned >= hoursNeeded) break;
+  lessons.sort((a, b) => {
+    const ta = a.teacherId || '';
+    const tb = b.teacherId || '';
+    if (ta !== tb) return ta.localeCompare(tb);
+    return a.groupId.localeCompare(b.groupId);
+  });
 
-      const slotKey = `${slot.day}-${slot.period}`;
-      const tKey = `${rule.teacherId}-${slotKey}`;
-      const gKey = `${rule.groupId}-${slotKey}`;
-      const rKey = `${rule.roomId}-${slotKey}`;
+  const schedule: any[] = [];
+  const conflicts: any[] = [];
+  const totalLessons = lessons.length;
+  let lessonsAssigned = 0;
 
-      const isTeacherBusy = rule.teacherId && teacherBusy.has(tKey);
-      const isGroupBusy = groupBusy.has(gKey);
-      const isRoomBusy = rule.roomId && roomBusy.has(rKey);
+  self.postMessage({ type: 'PROGRESS', payload: { progress: 5 } });
 
-      if (!isTeacherBusy && !isGroupBusy && !isRoomBusy) {
-        // Assign!
-        schedule.push({
-          id: crypto.randomUUID(),
-          ruleId: rule.id,
-          groupId: rule.groupId,
-          subjectId: rule.subjectId,
-          teacherId: rule.teacherId,
-          roomId: rule.roomId,
-          day: slot.day,
-          period: slot.period
-        });
+  for (const lesson of lessons) {
+    const targets = dailyTargets.get(lesson.groupId)!;
+    const counts = dailyCounts.get(lesson.groupId)!;
 
-        if (rule.teacherId) teacherBusy.add(tKey);
-        groupBusy.add(gKey);
-        if (rule.roomId) roomBusy.add(rKey);
+    const dayScores = days.map((day, di) => {
+      let score = targets[di] - counts[di];
+      if (lesson.teacherId) {
+        for (let p = 1; p <= maxPeriod; p++) {
+          if (teacherBusy.has(`${lesson.teacherId}-${day}-${p}`)) score += 0.5;
+        }
+      }
+      return { day, index: di, score };
+    });
 
-        hoursAssigned++;
-        lessonsAssigned++;
+    dayScores.sort((a, b) => b.score - a.score);
+
+    let assigned = false;
+
+    for (const ds of dayScores) {
+      if (assigned) break;
+
+      const periodScores: { period: number; score: number }[] = [];
+
+      for (let p = 1; p <= maxPeriod; p++) {
+        const slotKey = `${ds.day}-${p}`;
+        if (groupBusy.has(`${lesson.groupId}-${slotKey}`)) continue;
+        if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) continue;
+        if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) continue;
+
+        let score = 0;
+        if (lesson.teacherId) {
+          if (teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p - 1}`)) score += 10;
+          if (teacherBusy.has(`${lesson.teacherId}-${ds.day}-${p + 1}`)) score += 10;
+        }
+
+        periodScores.push({ period: p, score });
+      }
+
+      if (periodScores.length === 0) continue;
+
+      periodScores.sort((a, b) => b.score - a.score);
+      const best = periodScores[0];
+
+      schedule.push({
+        id: lesson.id,
+        ruleId: lesson.ruleId,
+        groupId: lesson.groupId,
+        subjectId: lesson.subjectId,
+        teacherId: lesson.teacherId,
+        roomId: lesson.roomId,
+        day: ds.day,
+        period: best.period,
+      });
+
+      const slotKey = `${ds.day}-${best.period}`;
+      groupBusy.add(`${lesson.groupId}-${slotKey}`);
+      if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
+      if (lesson.roomId) roomBusy.add(`${lesson.roomId}-${slotKey}`);
+
+      counts[ds.index]++;
+      lessonsAssigned++;
+      assigned = true;
+    }
+
+    if (!assigned) {
+      for (const day of days) {
+        if (assigned) break;
+        for (let p = 1; p <= maxPeriod; p++) {
+          const slotKey = `${day}-${p}`;
+          if (groupBusy.has(`${lesson.groupId}-${slotKey}`)) continue;
+          if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) continue;
+          if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) continue;
+
+          schedule.push({
+            id: lesson.id,
+            ruleId: lesson.ruleId,
+            groupId: lesson.groupId,
+            subjectId: lesson.subjectId,
+            teacherId: lesson.teacherId,
+            roomId: lesson.roomId,
+            day,
+            period: p,
+          });
+
+          groupBusy.add(`${lesson.groupId}-${slotKey}`);
+          if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
+          if (lesson.roomId) roomBusy.add(`${lesson.roomId}-${slotKey}`);
+          lessonsAssigned++;
+          assigned = true;
+          break;
+        }
       }
     }
 
-    if (hoursAssigned < hoursNeeded) {
+    if (!assigned) {
       conflicts.push({
         type: 'UNASSIGNED_HOURS',
-        ruleId: rule.id,
-        missing: hoursNeeded - hoursAssigned
+        ruleId: lesson.ruleId,
+        missing: 1,
       });
     }
 
-    const progress = 10 + Math.floor((lessonsAssigned / totalHours) * 80);
-    self.postMessage({ type: 'PROGRESS', payload: { progress } });
-  }
-
-  await sleep(300);
-  
-  self.postMessage({ 
-    type: 'RESULT', 
-    payload: { 
-      schedule, 
-      conflicts,
-      score: lessonsAssigned / totalHours
-    } 
-  });
-}
-
-function buildTimeSlots() {
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const periods = [1, 2, 3, 4, 5, 6, 7, 8];
-  const slots = [];
-
-  for (const day of days) {
-    for (const period of periods) {
-      slots.push({ day, period });
+    const progress = 5 + Math.floor((lessonsAssigned / totalLessons) * 90);
+    if (lessonsAssigned % 2 === 0 || lessonsAssigned === totalLessons) {
+      self.postMessage({ type: 'PROGRESS', payload: { progress } });
     }
   }
-  return slots;
+
+  await sleep(200);
+
+  const totalHours = project.curriculum.reduce((s, r) => s + r.hoursPerWeek, 0);
+  self.postMessage({
+    type: 'RESULT',
+    payload: {
+      schedule,
+      conflicts,
+      score: totalHours > 0 ? lessonsAssigned / totalHours : 0,
+    },
+  });
 }
 
 function sleep(ms: number) {
