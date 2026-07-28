@@ -18,7 +18,7 @@ export const ScheduleViewer = () => {
   const unassignedHours = neededHours - assignedHours;
   const score = project?.generatedSchedule?.score ?? 0;
 
-  const [filterType, setFilterType] = useState<'group' | 'teacher' | 'all'>('all');
+  const [filterType, setFilterType] = useState<'group' | 'teacher' | 'subject' | 'all'>('all');
   const [filterId, setFilterId] = useState<string>('');
   const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
 
@@ -57,6 +57,7 @@ export const ScheduleViewer = () => {
     return schedule.filter(lesson => {
       if (filterType === 'group') return lesson.groupId === filterId;
       if (filterType === 'teacher') return lesson.teacherId === filterId;
+      if (filterType === 'subject') return lesson.subjectId === filterId;
       return false;
     });
   }, [schedule, filterType, filterId]);
@@ -89,6 +90,7 @@ export const ScheduleViewer = () => {
           <option value="all">{t('all')}</option>
           <option value="group">{t('view_group')}</option>
           <option value="teacher">{t('view_teacher')}</option>
+          <option value="subject">{t('view_subject')}</option>
         </select>
 
         {filterType !== 'all' && (
@@ -96,7 +98,9 @@ export const ScheduleViewer = () => {
             <option value="">{t('select_view', { type: filterType })}</option>
             {filterType === 'group'
               ? groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)
-              : teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+              : filterType === 'teacher'
+              ? teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+              : subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
             }
           </select>
         )}

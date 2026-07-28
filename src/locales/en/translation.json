@@ -83,6 +83,7 @@
   "import_failed": "Failed to import: {{error}}",
   "view_group": "View Group",
   "view_teacher": "View Teacher",
+  "view_subject": "View Subject",
   "select_view": "Select {{type}} to view their schedule.",
   "period": "Period",
   "no_selection": "Please select a {{type}} to view their schedule.",

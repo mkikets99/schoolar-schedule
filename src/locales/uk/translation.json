@@ -83,6 +83,7 @@
   "import_failed": "Помилка імпорту: {{error}}",
   "view_group": "Група",
   "view_teacher": "Вчитель",
+  "view_subject": "Предмет",
   "select_view": "Виберіть {{type}} для перегляду",
   "period": "Період",
   "no_selection": "Виберіть {{type}} для перегляду розкладу.",
