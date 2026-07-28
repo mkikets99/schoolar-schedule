@@ -132,12 +132,28 @@ async function generateSchedule(project: ProjectState) {
 
   self.postMessage({ type: 'PROGRESS', payload: { progress: 5 } });
 
+  function getRoomTypes(roomId: string): string[] {
+    const room = allRooms.find(r => r.id === roomId);
+    return room ? room.types : [];
+  }
+
+  function findFallbackRoom(preferredId: string, slotKey: string): string | undefined {
+    const prefTypes = getRoomTypes(preferredId);
+    const fallback = allRooms.find(r => {
+      if (roomBusy.has(`${r.id}-${slotKey}`)) return false;
+      if (r.capacity === undefined) return false;
+      if (prefTypes.length > 0 && !prefTypes.some(t => r.types.includes(t))) return false;
+      return true;
+    });
+    return fallback?.id;
+  }
+
   function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean): boolean {
     const slotKey = `${day}-${period}`;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
     if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
     if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
-      const alt = allRooms.find(r => r.capacity !== undefined && !roomBusy.has(`${r.id}-${slotKey}`));
+      const alt = findFallbackRoom(lesson.roomId, slotKey);
       if (!alt) return false;
     }
     return true;
@@ -147,8 +163,8 @@ async function generateSchedule(project: ProjectState) {
     const slotKey = `${day}-${period}`;
     let roomId = lesson.roomId;
     if (roomId && roomBusy.has(`${roomId}-${slotKey}`)) {
-      const alt = allRooms.find(r => r.capacity !== undefined && !roomBusy.has(`${r.id}-${slotKey}`));
-      if (alt) roomId = alt.id;
+      const alt = findFallbackRoom(roomId, slotKey);
+      if (alt) roomId = alt;
     }
 
     schedule.push({

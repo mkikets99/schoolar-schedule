@@ -109,12 +109,28 @@ async function generateTestSchedule(project: ProjectState) {
   const schedule: any[] = [];
   const conflicts: any[] = [];
 
+  function getRoomTypes(roomId: string): string[] {
+    const room = allRooms.find(r => r.id === roomId);
+    return room ? room.types : [];
+  }
+
+  function findFallbackRoom(preferredId: string, slotKey: string): string | undefined {
+    const prefTypes = getRoomTypes(preferredId);
+    const fallback = allRooms.find(r => {
+      if (roomBusy.has(`${r.id}-${slotKey}`)) return false;
+      if (r.capacity === undefined) return false;
+      if (prefTypes.length > 0 && !prefTypes.some(t => r.types.includes(t))) return false;
+      return true;
+    });
+    return fallback?.id;
+  }
+
   function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean): boolean {
     const slotKey = `${day}-${period}`;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
     if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
     if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
-      const alt = allRooms.find(r => r.capacity !== undefined && !roomBusy.has(`${r.id}-${slotKey}`));
+      const alt = findFallbackRoom(lesson.roomId, slotKey);
       if (!alt) return false;
     }
     return true;
@@ -124,8 +140,8 @@ async function generateTestSchedule(project: ProjectState) {
     const slotKey = `${day}-${period}`;
     let roomId = lesson.roomId;
     if (roomId && roomBusy.has(`${roomId}-${slotKey}`)) {
-      const alt = allRooms.find(r => r.capacity !== undefined && !roomBusy.has(`${r.id}-${slotKey}`));
-      if (alt) roomId = alt.id;
+      const alt = findFallbackRoom(roomId, slotKey);
+      if (alt) roomId = alt;
     }
 
     schedule.push({
@@ -406,6 +422,33 @@ describe('Worker scheduling algorithm', () => {
     }
     for (const [, count] of dayCounts) {
       expect(count).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('falls back only to same-type room when preferred room is busy', async () => {
+    const project = makeProject({
+      rooms: [
+        { id: 'r1', name: 'Lab A', capacity: 18, types: ['computer-lab'] },
+        { id: 'r2', name: 'Lab B', capacity: 18, types: ['computer-lab'] },
+        { id: 'r3', name: 'Classroom', capacity: 30, types: ['classroom'] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 8, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj-math', hoursPerWeek: 8, teacherId: 't2', roomId: 'r3' },
+      ],
+      groups: [
+        { id: 'g1', name: '10-A', grade: 10, subgroups: [] },
+        { id: 'g2', name: '10-B', grade: 10, subgroups: [] },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    for (const lesson of result.schedule) {
+      const room = project.rooms.find(r => r.id === lesson.roomId);
+      if (lesson.ruleId === 'c1') {
+        expect(room?.types).toContain('computer-lab');
+      }
     }
   });
 
