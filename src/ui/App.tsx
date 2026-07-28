@@ -16,7 +16,7 @@ import './index.css';
 
 function AppContent() {
   const { t, i18n } = useTranslation();
-  const { project, isLoading, updateGeneratedSchedule } = useProject();
+  const { project, isLoading, updateGeneratedSchedule, clearGeneratedSchedule } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
   const workerRef = useRef<Worker | null>(null);
 
@@ -49,11 +49,23 @@ function AppContent() {
 
   const handleGenerateSchedule = () => {
     if (workerRef.current && project) {
+      clearGeneratedSchedule();
       setWorkerStatus(t('starting_gen'));
-      workerRef.current.postMessage({
-        type: 'GENERATE_SCHEDULE',
-        payload: project
-      });
+      setTimeout(() => {
+        if (workerRef.current) {
+          workerRef.current.postMessage({
+            type: 'GENERATE_SCHEDULE',
+            payload: project
+          });
+        }
+      }, 50);
+    }
+  };
+
+  const handleClearSchedule = () => {
+    if (confirm(t('confirm_clear_schedule'))) {
+      clearGeneratedSchedule();
+      setWorkerStatus(t('worker_ready'));
     }
   };
 
@@ -175,7 +187,10 @@ function AppContent() {
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <span className="legend-item"><span className="legend-dot locked-dot"></span> {t('locked')}</span>
                       <span className="legend-item"><span className="legend-dot conflict-dot"></span> {t('conflict')}</span>
-                      <button onClick={handleGenerateSchedule} className="generate-btn-small">{t('regenerate')}</button>
+                      {project.generatedSchedule && (
+                        <button onClick={handleClearSchedule} className="delete-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>{t('clear_schedule')}</button>
+                      )}
+                      <button onClick={handleGenerateSchedule} className="generate-btn-small">{project.generatedSchedule ? t('regenerate') : t('generate')}</button>
                     </div>
                   </div>
                   <ScheduleViewer />

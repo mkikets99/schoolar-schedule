@@ -165,5 +165,8 @@
   "max_daily": "Max/Day",
   "split_subjects": "Split Subjects",
   "split_subjects_desc": "Subjects checked here will be split into subgroups when multiple rules share the same group and subject.",
-  "no_subjects_yet": "Add subjects first to configure splits."
+  "no_subjects_yet": "Add subjects first to configure splits.",
+  "generate": "Generate",
+  "clear_schedule": "Clear Schedule",
+  "confirm_clear_schedule": "Are you sure you want to clear the generated schedule? This cannot be undone."
 }

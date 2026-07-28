@@ -15,7 +15,8 @@ interface ProjectContextType {
   updateCurriculum: (curriculum: CurriculumRule[]) => void;
   updateLoadDistribution: (load: LoadDistribution[]) => void;
   updateConstraints: (constraints: Constraint[]) => void;
-  updateGeneratedSchedule: (result: ScheduleResult) => void;
+  updateGeneratedSchedule: (result: ScheduleResult | undefined) => void;
+  clearGeneratedSchedule: () => void;
   createNewProject: (name: string) => void;
 }
 
@@ -106,8 +107,12 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     setProject(prev => prev ? { ...prev, constraints } : prev);
   };
 
-  const updateGeneratedSchedule = (generatedSchedule: ScheduleResult) => {
+  const updateGeneratedSchedule = (generatedSchedule: ScheduleResult | undefined) => {
     setProject(prev => prev ? { ...prev, generatedSchedule } : prev);
+  };
+
+  const clearGeneratedSchedule = () => {
+    updateGeneratedSchedule(undefined);
   };
 
   return (
@@ -125,6 +130,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
       updateLoadDistribution,
       updateConstraints,
       updateGeneratedSchedule,
+      clearGeneratedSchedule,
       createNewProject 
     }}>
       {children}

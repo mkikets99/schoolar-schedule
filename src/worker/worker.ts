@@ -227,11 +227,49 @@ async function generateSchedule(project: ProjectState) {
     return result;
   }
 
+  function getGroupExistingPeriods(groupId: string, day: string): number[] {
+    const periods: number[] = [];
+    for (const lesson of schedule) {
+      if (lesson.groupId === groupId && lesson.day === day) {
+        periods.push(lesson.period);
+      }
+    }
+    periods.sort((a, b) => a - b);
+    return periods;
+  }
+
+  function orderPeriodsByAdjacency(groupId: string, day: string, allPeriods: number[]): number[] {
+    const existing = getGroupExistingPeriods(groupId, day);
+    if (existing.length === 0) return allPeriods;
+
+    const cfg = groupConfig.get(groupId);
+    const pStart = cfg?.periodStart ?? 1;
+    const pEnd = cfg?.periodEnd ?? 8;
+    const ordered = new Set<number>();
+
+    for (const p of existing) {
+      if (p + 1 <= pEnd) ordered.add(p + 1);
+    }
+    for (let i = existing.length - 1; i >= 0; i--) {
+      if (existing[i] - 1 >= pStart) ordered.add(existing[i] - 1);
+    }
+    for (let i = 0; i < existing.length - 1; i++) {
+      for (let p = existing[i] + 1; p < existing[i + 1]; p++) {
+        ordered.add(p);
+      }
+    }
+    for (const p of allPeriods) {
+      ordered.add(p);
+    }
+    return [...ordered];
+  }
+
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
     const counts = dailyCounts.get(unit.groupId)!;
     const cfg = groupConfig.get(unit.groupId);
     const maxDaily = cfg?.maxDaily ?? 8;
+
     const dayScores = days.map((day, di) => ({
       day, index: di,
       need: counts[di] >= maxDaily ? -999 : targets[di] - counts[di],
@@ -239,17 +277,19 @@ async function generateSchedule(project: ProjectState) {
     dayScores.sort((a, b) => b.need - a.need);
 
     let placed = false;
-    const groupPeriods = getPeriodsForGroup(unit.groupId);
+    const allPeriods = getPeriodsForGroup(unit.groupId);
 
     for (const ds of dayScores) {
       if (placed) break;
+      const ordered = orderPeriodsByAdjacency(unit.groupId, ds.day, allPeriods);
+
       if (ds.need <= 0) {
-        for (const p of groupPeriods) {
+        for (const p of ordered) {
           if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
         }
       } else {
         const tId = unit.lessons[0]?.teacherId;
-        for (const p of groupPeriods) {
+        for (const p of ordered) {
           if (tId) {
             const prev = teacherBusy.has(`${tId}-${ds.day}-${p - 1}`);
             const next = teacherBusy.has(`${tId}-${ds.day}-${p + 1}`);
@@ -259,7 +299,7 @@ async function generateSchedule(project: ProjectState) {
           }
         }
         if (!placed) {
-          for (const p of groupPeriods) {
+          for (const p of ordered) {
             if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
           }
         }
@@ -269,7 +309,8 @@ async function generateSchedule(project: ProjectState) {
     if (!placed) {
       for (const day of days) {
         if (placed) break;
-        for (const p of groupPeriods) {
+        const ordered = orderPeriodsByAdjacency(unit.groupId, day, allPeriods);
+        for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
       }
