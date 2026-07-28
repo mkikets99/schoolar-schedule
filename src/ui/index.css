@@ -806,6 +806,54 @@ tr.unassigned {
   filter: brightness(1.2);
 }
 
+.slot.multi-slot {
+  padding: 0.25rem;
+}
+
+.lesson-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.lesson-box.mini {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+.lesson-box.mini .subject {
+  font-size: 0.75rem;
+  margin-bottom: 0;
+}
+
+.lesson-box.mini .details {
+  font-size: 0.65rem;
+}
+
+.lesson-box.mini .lock-badge {
+  font-size: 0.55rem;
+}
+
+.lesson-box.mini .conflict-badge-small {
+  width: 12px;
+  height: 12px;
+  font-size: 0.55rem;
+}
+
+.summary-badge {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.conflict-count {
+  color: #ff4d4d;
+}
+
+.full-schedule .slot {
+  height: auto;
+  min-height: 60px;
+}
+
 .constraint-inspector .no-conflicts {
   text-align: center;
   padding: 3rem;

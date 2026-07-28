@@ -143,5 +143,7 @@
   "export": "Експорт",
   "optional": "Необов'язково",
   "subgroups_count": "{{count}} підгруп",
-  "legend": "Легенда"
+  "legend": "Легенда",
+  "all": "Всі",
+  "generate_schedule_first": "Згенеруйте розклад, щоб побачити його тут."
 }
