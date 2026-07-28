@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Subject } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 
 export const SubjectEditor = () => {
+  const { t } = useTranslation();
   const { project, updateSubjects } = useProject();
   const subjects = project?.subjects || [];
 
@@ -28,7 +30,7 @@ export const SubjectEditor = () => {
   };
 
   const handleRemove = (id: string) => {
-    if (confirm('Are you sure you want to delete this subject?')) {
+    if (confirm(t('confirm_delete_subject'))) {
       updateSubjects(subjects.filter(t => t.id !== id));
     }
   };
@@ -44,17 +46,18 @@ export const SubjectEditor = () => {
       shortName: row.ShortName || row.shortName || row.Code || row.code || '',
       color: '#646cff'
     })).filter(s => s.name);
-    
+
     updateSubjects([...subjects, ...imported]);
+    alert(t('import_success', { count: imported.length }));
   };
 
   return (
     <div className="entity-editor">
       <div className="view-header">
-        <h2>Subjects</h2>
+        <h2>{t('subjects')}</h2>
         <div className="header-actions" style={{ display: 'flex', gap: '1rem' }}>
-          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">Import Data</button>
-          <button onClick={() => setIsModalOpen(true)} className="primary-btn">Add Subject</button>
+          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">{t('import_data')}</button>
+          <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_subject')}</button>
         </div>
       </div>
 
@@ -68,15 +71,15 @@ export const SubjectEditor = () => {
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        title="Add New Subject"
+        title={t('new_subject')}
         actions={
           <>
-            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">Cancel</button>
-            <button onClick={handleAdd} className="primary-btn">Create Subject</button>
+            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAdd} className="primary-btn">{t('create_subject')}</button>
           </>
         }
       >
-        <FormField label="Subject Name">
+        <FormField label={t('subject_name')}>
           <input 
             type="text" 
             placeholder="e.g. Mathematics" 
@@ -85,7 +88,7 @@ export const SubjectEditor = () => {
             autoFocus
           />
         </FormField>
-        <FormField label="Short Code">
+        <FormField label={t('short_code')}>
           <input 
             type="text" 
             placeholder="e.g. MATH" 
@@ -93,7 +96,7 @@ export const SubjectEditor = () => {
             onChange={(e) => setNewItem({ ...newItem, shortName: e.target.value })}
           />
         </FormField>
-        <FormField label="Color Label">
+        <FormField label={t('color_label')}>
           <input 
             type="color" 
             value={newItem.color}
@@ -105,10 +108,10 @@ export const SubjectEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Short Code</th>
-            <th style={{ width: '80px' }}>Color</th>
-            <th style={{ width: '100px' }}>Actions</th>
+            <th>{t('name')}</th>
+            <th>{t('short_code')}</th>
+            <th style={{ width: '80px' }}>{t('color')}</th>
+            <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -137,13 +140,13 @@ export const SubjectEditor = () => {
                 />
               </td>
               <td>
-                <button onClick={() => handleRemove(item.id)} className="delete-btn">Delete</button>
+                <button onClick={() => handleRemove(item.id)} className="delete-btn">{t('delete')}</button>
               </td>
             </tr>
           ))}
           {subjects.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">No subjects added yet.</td>
+              <td colSpan={4} className="empty-row">{t('no_subjects')}</td>
             </tr>
           )}
         </tbody>

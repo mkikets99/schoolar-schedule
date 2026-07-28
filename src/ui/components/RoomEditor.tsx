@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Room } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 
 export const RoomEditor = () => {
+  const { t } = useTranslation();
   const { project, updateRooms } = useProject();
   const rooms = project?.rooms || [];
 
@@ -28,7 +30,7 @@ export const RoomEditor = () => {
   };
 
   const handleRemove = (id: string) => {
-    if (confirm('Are you sure you want to delete this room?')) {
+    if (confirm(t('confirm_delete_room'))) {
       updateRooms(rooms.filter(t => t.id !== id));
     }
   };
@@ -44,17 +46,18 @@ export const RoomEditor = () => {
       capacity: parseInt(row.Capacity || row.capacity) || 30,
       types: [],
     })).filter(r => r.name);
-    
+
     updateRooms([...rooms, ...imported]);
+    alert(t('import_success', { count: imported.length }));
   };
 
   return (
     <div className="entity-editor">
       <div className="view-header">
-        <h2>Rooms</h2>
+        <h2>{t('rooms')}</h2>
         <div className="header-actions" style={{ display: 'flex', gap: '1rem' }}>
-          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">Import Data</button>
-          <button onClick={() => setIsModalOpen(true)} className="primary-btn">Add Room</button>
+          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">{t('import_data')}</button>
+          <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_room')}</button>
         </div>
       </div>
 
@@ -68,15 +71,15 @@ export const RoomEditor = () => {
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        title="Add New Room"
+        title={t('new_room')}
         actions={
           <>
-            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">Cancel</button>
-            <button onClick={handleAdd} className="primary-btn">Create Room</button>
+            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAdd} className="primary-btn">{t('create_room')}</button>
           </>
         }
       >
-        <FormField label="Room Name / Number">
+        <FormField label={t('room_name')}>
           <input 
             type="text" 
             placeholder="e.g. Room 101 or Physics Lab" 
@@ -85,7 +88,7 @@ export const RoomEditor = () => {
             autoFocus
           />
         </FormField>
-        <FormField label="Capacity (Students)">
+        <FormField label={t('capacity')}>
           <input 
             type="number" 
             value={newItem.capacity}
@@ -98,10 +101,10 @@ export const RoomEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Capacity</th>
-            <th>Types</th>
-            <th style={{ width: '100px' }}>Actions</th>
+            <th>{t('name')}</th>
+            <th>{t('capacity_students')}</th>
+            <th>{t('types')}</th>
+            <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -123,13 +126,13 @@ export const RoomEditor = () => {
               </td>
               <td>{item.types.join(', ')}</td>
               <td>
-                <button onClick={() => handleRemove(item.id)} className="delete-btn">Delete</button>
+                <button onClick={() => handleRemove(item.id)} className="delete-btn">{t('delete')}</button>
               </td>
             </tr>
           ))}
           {rooms.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">No rooms added yet.</td>
+              <td colSpan={4} className="empty-row">{t('no_rooms')}</td>
             </tr>
           )}
         </tbody>

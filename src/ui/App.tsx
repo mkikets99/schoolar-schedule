@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { ProjectManager } from './components/ProjectManager';
+import { SchoolEditor } from './components/SchoolEditor';
 import { TeacherEditor } from './components/TeacherEditor';
 import { SubjectEditor } from './components/SubjectEditor';
 import { RoomEditor } from './components/RoomEditor';
@@ -9,6 +10,7 @@ import { GroupEditor } from './components/GroupEditor';
 import { CurriculumEditor } from './components/CurriculumEditor';
 import { LoadDistributionUI } from './components/LoadDistributionUI';
 import { ScheduleViewer } from './components/ScheduleViewer';
+import { ConstraintInspector } from './components/ConstraintInspector';
 import { exportProject } from './services/ProjectExportService';
 import './index.css';
 
@@ -43,7 +45,7 @@ function AppContent() {
     };
   }, []);
 
-  const [currentView, setCurrentView] = useState<'dashboard' | 'teachers' | 'subjects' | 'rooms' | 'groups' | 'curriculum' | 'load' | 'schedule'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'school' | 'teachers' | 'subjects' | 'rooms' | 'groups' | 'curriculum' | 'load' | 'schedule' | 'constraints'>('dashboard');
 
   const handleGenerateSchedule = () => {
     if (workerRef.current && project) {
@@ -76,7 +78,7 @@ function AppContent() {
       <header>
         <div className="header-brand">
           <h1>{t('app_title')}</h1>
-          {project && <span className="project-badge">{project.school.name}</span>}
+          {project && <ProjectManager />}
         </div>
         
         <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -110,17 +112,19 @@ function AppContent() {
             <nav className="side-nav">
               <div className="nav-group">
                 <button className={currentView === 'dashboard' ? 'active' : ''} onClick={() => setCurrentView('dashboard')}>{t('dashboard')}</button>
+                <button className={currentView === 'school' ? 'active' : ''} onClick={() => setCurrentView('school')}>{t('school_settings')}</button>
                 <button className={currentView === 'teachers' ? 'active' : ''} onClick={() => setCurrentView('teachers')}>{t('teachers')}</button>
                 <button className={currentView === 'subjects' ? 'active' : ''} onClick={() => setCurrentView('subjects')}>{t('subjects')}</button>
                 <button className={currentView === 'rooms' ? 'active' : ''} onClick={() => setCurrentView('rooms')}>{t('rooms')}</button>
                 <button className={currentView === 'groups' ? 'active' : ''} onClick={() => setCurrentView('groups')}>{t('groups')}</button>
                 <button className={currentView === 'curriculum' ? 'active' : ''} onClick={() => setCurrentView('curriculum')}>{t('curriculum')}</button>
                 <button className={currentView === 'load' ? 'active' : ''} onClick={() => setCurrentView('load')}>{t('load_distribution')}</button>
+                <button className={currentView === 'constraints' ? 'active' : ''} onClick={() => setCurrentView('constraints')}>{t('constraints')}</button>
                 <button className={currentView === 'schedule' ? 'active' : ''} onClick={() => setCurrentView('schedule')}>{t('schedule')}</button>
               </div>
 
               <div className="nav-footer">
-                <button onClick={() => exportProject(project)}>Export .schoolproj</button>
+                <button onClick={() => exportProject(project)}>{t('export')} .schoolproj</button>
                 <button onClick={handleReset} className="reset-btn">{t('cancel')} / {t('reset')}</button>
               </div>
             </nav>
@@ -156,17 +160,23 @@ function AppContent() {
                   </div>
                 </section>
               )}
-              {currentView === 'teachers' && <section className="editor-view"><h2>{t('teachers')}</h2><TeacherEditor /></section>}
-              {currentView === 'subjects' && <section className="editor-view"><h2>{t('subjects')}</h2><SubjectEditor /></section>}
-              {currentView === 'rooms' && <section className="editor-view"><h2>{t('rooms')}</h2><RoomEditor /></section>}
-              {currentView === 'groups' && <section className="editor-view"><h2>{t('groups')}</h2><GroupEditor /></section>}
-              {currentView === 'curriculum' && <section className="editor-view"><h2>{t('curriculum')}</h2><CurriculumEditor /></section>}
-              {currentView === 'load' && <section className="editor-view"><h2>{t('load_distribution')}</h2><LoadDistributionUI /></section>}
+              {currentView === 'school' && <section className="editor-view"><SchoolEditor /></section>}
+              {currentView === 'teachers' && <section className="editor-view"><TeacherEditor /></section>}
+              {currentView === 'subjects' && <section className="editor-view"><SubjectEditor /></section>}
+              {currentView === 'rooms' && <section className="editor-view"><RoomEditor /></section>}
+              {currentView === 'groups' && <section className="editor-view"><GroupEditor /></section>}
+              {currentView === 'curriculum' && <section className="editor-view"><CurriculumEditor /></section>}
+              {currentView === 'load' && <section className="editor-view"><LoadDistributionUI /></section>}
+              {currentView === 'constraints' && <section className="editor-view"><ConstraintInspector /></section>}
               {currentView === 'schedule' && (
                 <section className="schedule-view">
                   <div className="view-header">
                     <h2>{t('schedule')}</h2>
-                    <button onClick={handleGenerateSchedule} className="generate-btn-small">{t('regenerate')}</button>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <span className="legend-item"><span className="legend-dot locked-dot"></span> {t('locked')}</span>
+                      <span className="legend-item"><span className="legend-dot conflict-dot"></span> {t('conflict')}</span>
+                      <button onClick={handleGenerateSchedule} className="generate-btn-small">{t('regenerate')}</button>
+                    </div>
                   </div>
                   <ScheduleViewer />
                 </section>

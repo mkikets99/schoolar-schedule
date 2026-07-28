@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Group } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 
 export const GroupEditor = () => {
+  const { t } = useTranslation();
   const { project, updateGroups } = useProject();
   const groups = project?.groups || [];
 
@@ -28,7 +30,7 @@ export const GroupEditor = () => {
   };
 
   const handleRemove = (id: string) => {
-    if (confirm('Are you sure you want to delete this group?')) {
+    if (confirm(t('confirm_delete_group'))) {
       updateGroups(groups.filter(t => t.id !== id));
     }
   };
@@ -44,17 +46,18 @@ export const GroupEditor = () => {
       grade: parseInt(row.Grade || row.grade) || 1,
       subgroups: [],
     })).filter(g => g.name);
-    
+
     updateGroups([...groups, ...imported]);
+    alert(t('import_success', { count: imported.length }));
   };
 
   return (
     <div className="entity-editor">
       <div className="view-header">
-        <h2>Groups</h2>
+        <h2>{t('groups')}</h2>
         <div className="header-actions" style={{ display: 'flex', gap: '1rem' }}>
-          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">Import Data</button>
-          <button onClick={() => setIsModalOpen(true)} className="primary-btn">Add Group</button>
+          <button onClick={() => setIsImportModalOpen(true)} className="secondary-btn">{t('import_data')}</button>
+          <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_group')}</button>
         </div>
       </div>
 
@@ -68,15 +71,15 @@ export const GroupEditor = () => {
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)} 
-        title="Add New Group"
+        title={t('new_group')}
         actions={
           <>
-            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">Cancel</button>
-            <button onClick={handleAdd} className="primary-btn">Create Group</button>
+            <button onClick={() => setIsModalOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAdd} className="primary-btn">{t('create_group')}</button>
           </>
         }
       >
-        <FormField label="Group Name">
+        <FormField label={t('group_name')}>
           <input 
             type="text" 
             placeholder="e.g. 10-A or Class 4" 
@@ -85,7 +88,7 @@ export const GroupEditor = () => {
             autoFocus
           />
         </FormField>
-        <FormField label="Grade / Level">
+        <FormField label={t('grade_level')}>
           <input 
             type="number" 
             value={newItem.grade}
@@ -99,10 +102,10 @@ export const GroupEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Grade</th>
-            <th>Subgroups</th>
-            <th style={{ width: '100px' }}>Actions</th>
+            <th>{t('name')}</th>
+            <th>{t('grade')}</th>
+            <th>{t('subgroups')}</th>
+            <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -124,15 +127,15 @@ export const GroupEditor = () => {
                   max="12"
                 />
               </td>
-              <td>{item.subgroups.length} subgroups</td>
+              <td>{t('subgroups_count', { count: item.subgroups.length })}</td>
               <td>
-                <button onClick={() => handleRemove(item.id)} className="delete-btn">Delete</button>
+                <button onClick={() => handleRemove(item.id)} className="delete-btn">{t('delete')}</button>
               </td>
             </tr>
           ))}
           {groups.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">No groups added yet.</td>
+              <td colSpan={4} className="empty-row">{t('no_groups')}</td>
             </tr>
           )}
         </tbody>

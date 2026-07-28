@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult } from '../../shared/types';
+import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult, AcademicYear, Constraint } from '../../shared/types';
 import { storageService } from '../services/StorageService';
 
 interface ProjectContextType {
@@ -7,12 +7,14 @@ interface ProjectContextType {
   isLoading: boolean;
   setProject: (project: ProjectState) => void;
   updateSchool: (school: School) => void;
+  updateAcademicYears: (years: AcademicYear[]) => void;
   updateTeachers: (teachers: Teacher[]) => void;
   updateSubjects: (subjects: Subject[]) => void;
   updateRooms: (rooms: Room[]) => void;
   updateGroups: (groups: Group[]) => void;
   updateCurriculum: (curriculum: CurriculumRule[]) => void;
   updateLoadDistribution: (load: LoadDistribution[]) => void;
+  updateConstraints: (constraints: Constraint[]) => void;
   updateGeneratedSchedule: (result: ScheduleResult) => void;
   createNewProject: (name: string) => void;
 }
@@ -74,6 +76,12 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateAcademicYears = (academicYears: AcademicYear[]) => {
+    if (project) {
+      setProject({ ...project, academicYears });
+    }
+  };
+
   const updateTeachers = (teachers: Teacher[]) => {
     if (project) {
       setProject({ ...project, teachers });
@@ -110,6 +118,12 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const updateConstraints = (constraints: Constraint[]) => {
+    if (project) {
+      setProject({ ...project, constraints });
+    }
+  };
+
   const updateGeneratedSchedule = (generatedSchedule: ScheduleResult) => {
     if (project) {
       setProject({ ...project, generatedSchedule });
@@ -122,12 +136,14 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
       isLoading, 
       setProject, 
       updateSchool, 
+      updateAcademicYears,
       updateTeachers, 
       updateSubjects, 
       updateRooms, 
       updateGroups,
       updateCurriculum,
       updateLoadDistribution,
+      updateConstraints,
       updateGeneratedSchedule,
       createNewProject 
     }}>
