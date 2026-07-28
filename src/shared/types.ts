@@ -6,6 +6,7 @@ export interface School {
   id: string;
   name: string;
   address?: string;
+  splitSubjects?: string[];
 }
 
 export interface AcademicYear {
@@ -41,8 +42,11 @@ export interface Group {
   id: string;
   name: string;
   grade: number;
-  subgroups: string[]; // Subgroup IDs or names
-  parentGroupId?: string; // For subgroups
+  subgroups: string[];
+  parentGroupId?: string;
+  periodStart?: number;
+  periodEnd?: number;
+  maxDailyLessons?: number;
 }
 
 export interface CurriculumRule {

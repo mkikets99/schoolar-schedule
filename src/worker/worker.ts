@@ -32,22 +32,30 @@ interface SchedulingUnit {
   lessons: LessonStub[];
 }
 
+interface GroupScheduleConfig {
+  periodStart: number;
+  periodEnd: number;
+  maxDaily: number;
+}
+
 async function generateSchedule(project: ProjectState) {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const maxPeriod = 8;
   const allRooms = project.rooms || [];
+
+  const groupConfig = new Map<string, GroupScheduleConfig>();
+  for (const group of project.groups || []) {
+    groupConfig.set(group.id, {
+      periodStart: group.periodStart ?? 1,
+      periodEnd: group.periodEnd ?? 8,
+      maxDaily: group.maxDailyLessons ?? 8,
+    });
+  }
 
   self.postMessage({ type: 'PROGRESS', payload: { progress: 2 } });
 
   const teacherBusy = new Set<string>();
   const groupBusy = new Set<string>();
   const roomBusy = new Set<string>();
-
-  const byGroup = new Map<string, CurriculumRule[]>();
-  for (const rule of project.curriculum) {
-    if (!byGroup.has(rule.groupId)) byGroup.set(rule.groupId, []);
-    byGroup.get(rule.groupId)!.push(rule);
-  }
 
   const splitKeys = new Set<string>();
   const seen = new Map<string, CurriculumRule[]>();
@@ -59,10 +67,8 @@ async function generateSchedule(project: ProjectState) {
   }
 
   const units: SchedulingUnit[] = [];
-  const processed = new Set<string>();
 
   for (const [key, rules] of seen) {
-    processed.add(key);
     const [groupId] = key.split('|');
 
     if (splitKeys.has(key)) {
@@ -106,9 +112,18 @@ async function generateSchedule(project: ProjectState) {
 
   const dailyTargets = new Map<string, number[]>();
   for (const [gid, total] of batchCounts) {
-    const targets = days.map(() => 0);
-    for (let h = 0; h < total; h++) targets[h % 5]++;
-    dailyTargets.set(gid, targets);
+    const cfg = groupConfig.get(gid);
+    const maxDaily = cfg?.maxDaily ?? 8;
+    const raw = days.map(() => 0);
+    for (let h = 0; h < total; h++) raw[h % 5]++;
+    const capped = raw.map(v => Math.min(v, maxDaily));
+    let overflow = raw.reduce((s, v) => s + Math.max(0, v - maxDaily), 0);
+    let idx = 0;
+    while (overflow > 0 && idx < 100) {
+      if (capped[idx % 5] < maxDaily) { capped[idx % 5]++; overflow--; }
+      idx++;
+    }
+    dailyTargets.set(gid, capped);
   }
 
   const dailyCounts = new Map<string, number[]>();
@@ -203,51 +218,64 @@ async function generateSchedule(project: ProjectState) {
     return true;
   }
 
+  function getPeriodsForGroup(groupId: string): number[] {
+    const cfg = groupConfig.get(groupId);
+    const start = cfg?.periodStart ?? 1;
+    const end = cfg?.periodEnd ?? 8;
+    const result: number[] = [];
+    for (let p = start; p <= end; p++) result.push(p);
+    return result;
+  }
+
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
     const counts = dailyCounts.get(unit.groupId)!;
-    let assigned = false;
-
+    const cfg = groupConfig.get(unit.groupId);
+    const maxDaily = cfg?.maxDaily ?? 8;
     const dayScores = days.map((day, di) => ({
-      day, index: di, need: targets[di] - counts[di],
+      day, index: di,
+      need: counts[di] >= maxDaily ? -999 : targets[di] - counts[di],
     }));
     dayScores.sort((a, b) => b.need - a.need);
 
+    let placed = false;
+    const groupPeriods = getPeriodsForGroup(unit.groupId);
+
     for (const ds of dayScores) {
-      if (assigned) break;
+      if (placed) break;
       if (ds.need <= 0) {
-        for (let p = 1; p <= maxPeriod; p++) {
-          if (tryPlaceUnit(unit, ds.day, p)) { assigned = true; break; }
+        for (const p of groupPeriods) {
+          if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
         }
       } else {
         const tId = unit.lessons[0]?.teacherId;
-        for (let p = 1; p <= maxPeriod; p++) {
+        for (const p of groupPeriods) {
           if (tId) {
             const prev = teacherBusy.has(`${tId}-${ds.day}-${p - 1}`);
             const next = teacherBusy.has(`${tId}-${ds.day}-${p + 1}`);
             if (prev || next) {
-              if (tryPlaceUnit(unit, ds.day, p)) { assigned = true; break; }
+              if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
             }
           }
         }
-        if (!assigned) {
-          for (let p = 1; p <= maxPeriod; p++) {
-            if (tryPlaceUnit(unit, ds.day, p)) { assigned = true; break; }
+        if (!placed) {
+          for (const p of groupPeriods) {
+            if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
           }
         }
       }
     }
 
-    if (!assigned) {
+    if (!placed) {
       for (const day of days) {
-        if (assigned) break;
-        for (let p = 1; p <= maxPeriod; p++) {
-          if (tryPlaceUnit(unit, day, p)) { assigned = true; break; }
+        if (placed) break;
+        for (const p of groupPeriods) {
+          if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
       }
     }
 
-    if (assigned) {
+    if (placed) {
       const di = days.indexOf(schedule[schedule.length - 1].day);
       if (di >= 0) counts[di]++;
       unitsAssigned++;
@@ -257,7 +285,7 @@ async function generateSchedule(project: ProjectState) {
       }
     }
 
-    if (unitsAssigned % 5 === 0 || unitsAssigned === totalUnits || !assigned) {
+    if (unitsAssigned % 5 === 0 || unitsAssigned === totalUnits || !placed) {
       const progress = 5 + Math.floor((unitsAssigned / totalUnits) * 90);
       self.postMessage({ type: 'PROGRESS', payload: { progress } });
     }

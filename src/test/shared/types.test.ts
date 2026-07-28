@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ProjectState,
+  School,
   Teacher,
   Subject,
   Room,
@@ -83,5 +84,24 @@ describe('ProjectState structure', () => {
   it('allows subgroups as empty array on Group', () => {
     const g: Group = { id: 'g2', name: '11-B', grade: 11, subgroups: [] };
     expect(g.subgroups).toEqual([]);
+  });
+
+  it('supports periodStart, periodEnd, maxDailyLessons on Group', () => {
+    const g: Group = { id: 'g3', name: '6-A', grade: 6, subgroups: [], periodStart: 6, periodEnd: 12, maxDailyLessons: 7 };
+    expect(g.periodStart).toBe(6);
+    expect(g.periodEnd).toBe(12);
+    expect(g.maxDailyLessons).toBe(7);
+  });
+
+  it('defaults optional period fields to undefined on Group', () => {
+    const g: Group = { id: 'g4', name: '10-A', grade: 10, subgroups: [] };
+    expect(g.periodStart).toBeUndefined();
+    expect(g.periodEnd).toBeUndefined();
+    expect(g.maxDailyLessons).toBeUndefined();
+  });
+
+  it('supports splitSubjects on School', () => {
+    const s: School = { id: 's1', name: 'Test', splitSubjects: ['subj1', 'subj2'] };
+    expect(s.splitSubjects).toEqual(['subj1', 'subj2']);
   });
 });

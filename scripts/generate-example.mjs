@@ -53,11 +53,17 @@ const classCounts = { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 2, 9: 2, 10: 
 for (let grade = 1; grade <= 11 && groupIdx < 25; grade++) {
   const count = classCounts[grade] || 2;
   for (let l = 0; l < count && groupIdx < 25; l++) {
+    const periodConfig = grade <= 4
+      ? { periodStart: 1, periodEnd: 8, maxDailyLessons: 5 }
+      : grade <= 8
+      ? { periodStart: 6, periodEnd: 12, maxDailyLessons: 7 }
+      : { periodStart: 1, periodEnd: 8, maxDailyLessons: 7 };
     groups.push({
       id: `g-${String(groupIdx + 1).padStart(2, '0')}`,
       name: `${grade}-${letters[l]}`,
       grade,
       subgroups: [],
+      ...periodConfig,
     });
     groupIdx++;
   }
@@ -243,7 +249,7 @@ const constraints = [];
 
 const manifest = {
   version: '1.0.0',
-  school: { id: 'sch-001', name: 'Big Example School' },
+  school: { id: 'sch-001', name: 'Big Example School', splitSubjects: ['s-info', 's-tech'] },
   exportedAt: new Date().toISOString(),
   files: [
     'academic_years.json', 'teachers.json', 'subjects.json', 'rooms.json',

@@ -23,7 +23,7 @@ export const ScheduleViewer = () => {
   const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
 
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const periods = [1, 2, 3, 4, 5, 6, 7, 8];
+  const allPeriods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
   const conflictKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -148,7 +148,7 @@ export const ScheduleViewer = () => {
               </tr>
             </thead>
             <tbody>
-              {periods.map(period => (
+              {allPeriods.map(period => (
                 <tr key={period}>
                   <td className="period-col">{period}</td>
                   {days.map(day => {

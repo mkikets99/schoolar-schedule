@@ -12,7 +12,7 @@ export const GroupEditor = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', grade: 1 });
+  const [newItem, setNewItem] = useState({ name: '', grade: 1, shift: 'first' as 'first' | 'second' });
 
   const handleAdd = () => {
     if (!newItem.name.trim()) return;
@@ -22,10 +22,13 @@ export const GroupEditor = () => {
       name: newItem.name.trim(),
       grade: newItem.grade,
       subgroups: [],
+      periodStart: newItem.shift === 'first' ? 1 : 6,
+      periodEnd: newItem.shift === 'first' ? 8 : 12,
+      maxDailyLessons: newItem.grade <= 4 ? 5 : 7,
     };
 
     updateGroups([...groups, group]);
-    setNewItem({ name: '', grade: 1 });
+    setNewItem({ name: '', grade: 1, shift: 'first' });
     setIsModalOpen(false);
   };
 
@@ -97,13 +100,25 @@ export const GroupEditor = () => {
             max="12"
           />
         </FormField>
+        <FormField label={t('shift')}>
+          <select 
+            value={newItem.shift}
+            onChange={(e) => setNewItem({ ...newItem, shift: e.target.value as 'first' | 'second' })}
+          >
+            <option value="first">{t('shift_first')} (1-8)</option>
+            <option value="second">{t('shift_second')} (6-12)</option>
+          </select>
+        </FormField>
       </Modal>
 
-      <table className="editor-table">
+        <table className="editor-table">
         <thead>
           <tr>
             <th>{t('name')}</th>
             <th>{t('grade')}</th>
+            <th>{t('shift')}</th>
+            <th>{t('periods')}</th>
+            <th>{t('max_daily')}</th>
             <th>{t('subgroups')}</th>
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
@@ -127,6 +142,32 @@ export const GroupEditor = () => {
                   max="12"
                 />
               </td>
+              <td>
+                <select 
+                  value={item.periodStart === 6 ? 'second' : 'first'}
+                  onChange={(e) => {
+                    const shift = e.target.value;
+                    handleUpdate(item.id, {
+                      periodStart: shift === 'first' ? 1 : 6,
+                      periodEnd: shift === 'first' ? 8 : 12,
+                    });
+                  }}
+                >
+                  <option value="first">{t('shift_first')}</option>
+                  <option value="second">{t('shift_second')}</option>
+                </select>
+              </td>
+              <td>{item.periodStart ?? 1}–{item.periodEnd ?? 8}</td>
+              <td>
+                <input 
+                  type="number" 
+                  value={item.maxDailyLessons ?? 8}
+                  onChange={(e) => handleUpdate(item.id, { maxDailyLessons: parseInt(e.target.value) || 1 })}
+                  min="1"
+                  max="12"
+                  style={{ width: '60px' }}
+                />
+              </td>
               <td>{t('subgroups_count', { count: item.subgroups.length })}</td>
               <td>
                 <button onClick={() => handleRemove(item.id)} className="delete-btn">{t('delete')}</button>
@@ -135,7 +176,7 @@ export const GroupEditor = () => {
           ))}
           {groups.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">{t('no_groups')}</td>
+              <td colSpan={7} className="empty-row">{t('no_groups')}</td>
             </tr>
           )}
         </tbody>

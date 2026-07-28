@@ -157,5 +157,13 @@
   "subgroup_count": "Number of subgroups",
   "subgroup_n": "Subgroup {{n}}",
   "split": "Split",
-  "add_split_rule": "Add Split Rule"
+  "add_split_rule": "Add Split Rule",
+  "shift": "Shift",
+  "shift_first": "First Shift",
+  "shift_second": "Second Shift",
+  "periods": "Periods",
+  "max_daily": "Max/Day",
+  "split_subjects": "Split Subjects",
+  "split_subjects_desc": "Subjects checked here will be split into subgroups when multiple rules share the same group and subject.",
+  "no_subjects_yet": "Add subjects first to configure splits."
 }
