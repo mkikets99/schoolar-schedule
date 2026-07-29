@@ -171,5 +171,11 @@
   "confirm_clear_schedule": "Are you sure you want to clear the generated schedule? This cannot be undone.",
   "build_date": "Build: {{date}}",
   "export_xlsx": "Export as Excel (.xlsx)",
-  "export_pdf": "Export as PDF"
+  "export_pdf": "Export as PDF",
+  "schedule_title": "Schedule",
+  "monday": "Monday",
+  "tuesday": "Tuesday",
+  "wednesday": "Wednesday",
+  "thursday": "Thursday",
+  "friday": "Friday"
 }
