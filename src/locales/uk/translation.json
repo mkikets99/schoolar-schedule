@@ -168,5 +168,15 @@
   "no_subjects_yet": "Спочатку додайте предмети, щоб налаштувати поділ.",
   "generate": "Згенерувати",
   "clear_schedule": "Очистити розклад",
-  "confirm_clear_schedule": "Ви дійсно бажаєте очистити згенерований розклад? Цю дію не можна скасувати."
+  "confirm_clear_schedule": "Ви дійсно бажаєте очистити згенерований розклад? Цю дію не можна скасувати.",
+  "build_date": "Збірка: {{date}}",
+  "export_xlsx": "Експорт у Excel (.xlsx)",
+  "export_pdf": "Експорт у PDF",
+  "export_overview": "Overview",
+  "schedule_title": "Розклад",
+  "monday": "Понеділок",
+  "tuesday": "Вівторок",
+  "wednesday": "Середа",
+  "thursday": "Четвер",
+  "friday": "П'ятниця"
 }
