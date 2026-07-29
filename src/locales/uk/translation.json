@@ -165,5 +165,7 @@
   "generate": "Згенерувати",
   "clear_schedule": "Очистити розклад",
   "confirm_clear_schedule": "Ви дійсно бажаєте очистити згенерований розклад? Цю дію не можна скасувати.",
-  "build_date": "Збірка: {{date}}"
+  "build_date": "Збірка: {{date}}",
+  "export_xlsx": "Експорт у Excel (.xlsx)",
+  "export_pdf": "Експорт у PDF"
 }

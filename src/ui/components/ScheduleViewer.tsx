@@ -1,5 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import { useProject } from '../context/ProjectContext';
 
 export const ScheduleViewer = () => {
@@ -10,6 +12,7 @@ export const ScheduleViewer = () => {
   const teachers = project?.teachers || [];
   const subjects = project?.subjects || [];
   const rooms = project?.rooms || [];
+  const schoolName = project?.school.name || 'Schedule';
 
   const neededHours = useMemo(() =>
     (project?.curriculum || []).reduce((s, r) => s + r.hoursPerWeek, 0),
@@ -76,6 +79,107 @@ export const ScheduleViewer = () => {
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getRoomName = (id?: string) => rooms.find(r => r.id === id)?.name || '';
 
+  const formatCellText = (day: string, period: number): string => {
+    const lessons = schedule.filter(l => l.day === day && l.period === period);
+    if (lessons.length === 0) return '';
+    return lessons.map(l => {
+      const parts = [getSubjectName(l.subjectId), getGroupName(l.groupId)];
+      if (l.teacherId) parts.push(getTeacherName(l.teacherId));
+      if (l.roomId) parts.push(getRoomName(l.roomId));
+      return parts.join(' | ');
+    }).join('\n');
+  };
+
+  const buildGridData = () => {
+    const usedPeriods = new Set<number>();
+    for (const lesson of schedule) usedPeriods.add(lesson.period);
+    const periods = [...usedPeriods].sort((a, b) => a - b);
+
+    const header = ['Period', ...days];
+    const rows: string[][] = [header];
+    for (const p of periods) {
+      rows.push([String(p), ...days.map(d => formatCellText(d, p))]);
+    }
+    return rows;
+  };
+
+  const exportXLSX = useCallback(() => {
+    const data = buildGridData();
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    const colWidths = [{ wch: 8 }, ...days.map(() => ({ wch: 30 }))];
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+    XLSX.writeFile(wb, `${schoolName.replace(/\s+/g, '_')}_schedule.xlsx`);
+  }, [schedule, schoolName, days]);
+
+  const exportPDF = useCallback(() => {
+    const data = buildGridData();
+    if (data.length <= 1) return;
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 10;
+    const usableW = pageW - margin * 2;
+
+    doc.setFontSize(14);
+    doc.text(`${schoolName} - Schedule`, margin, 16);
+
+    const colCount = data[0].length;
+    const colW = usableW / colCount;
+    const rowH = 8;
+    const startY = 22;
+    const pageH = doc.internal.pageSize.getHeight();
+    const bottomMargin = margin;
+
+    const fontSize = 6.5;
+    doc.setFontSize(fontSize);
+
+    const drawCell = (x: number, y: number, w: number, h: number, text: string, isHeader: boolean) => {
+      doc.setDrawColor(200);
+      if (isHeader) {
+        doc.setFillColor(240, 240, 240);
+        doc.rect(x, y, w, h, 'FD');
+      } else {
+        doc.rect(x, y, w, h);
+      }
+      doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(text, w - 2);
+      const lineH = fontSize * 0.35;
+      lines.forEach((line: string, li: number) => {
+        if ((li + 1) * lineH < h - 1) {
+          doc.text(line, x + 1, y + 1 + (li + 1) * lineH + (isHeader ? 2 : 0));
+        }
+      });
+    };
+
+    let maxLines = 1;
+    for (let ri = 0; ri < data.length; ri++) {
+      for (let ci = 0; ci < colCount; ci++) {
+        const lines = doc.splitTextToSize(data[ri][ci] || '', colW - 2);
+        maxLines = Math.max(maxLines, lines.length);
+      }
+    }
+    const actualRowH = Math.max(rowH, Math.min(maxLines * fontSize * 0.35 + 2, 30));
+
+    let cursorY = startY;
+    for (let ri = 0; ri < data.length; ri++) {
+      if (cursorY + actualRowH > pageH - bottomMargin) {
+        doc.addPage();
+        cursorY = margin;
+      }
+      for (let ci = 0; ci < colCount; ci++) {
+        const x = margin + ci * colW;
+        drawCell(x, cursorY, colW, actualRowH, data[ri][ci] || '', ri === 0);
+      }
+      cursorY += actualRowH;
+    }
+
+    doc.save(`${schoolName.replace(/\s+/g, '_')}_schedule.pdf`);
+  }, [schedule, schoolName, days]);
+
   const toggleLock = (lessonId: string) => {
     setLockedLessons(prev => {
       const next = new Set(prev);
@@ -87,6 +191,8 @@ export const ScheduleViewer = () => {
 
   const isLocked = (lessonId: string) => lockedLessons.has(lessonId);
   const isConflict = (lessonId: string) => conflictKeys.has(lessonId);
+
+  const hasSchedule = schedule.length > 0;
 
   return (
     <div className="schedule-viewer">
@@ -116,6 +222,13 @@ export const ScheduleViewer = () => {
             {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
           </div>
         )}
+
+        {hasSchedule && (
+          <div className="export-actions">
+            <button onClick={exportXLSX} className="export-btn" title={t('export_xlsx')}>XLSX</button>
+            <button onClick={exportPDF} className="export-btn" title={t('export_pdf')}>PDF</button>
+          </div>
+        )}
       </div>
 
       <div className="schedule-stats">
@@ -141,11 +254,11 @@ export const ScheduleViewer = () => {
         </div>
       </div>
 
-      {schedule.length === 0 ? (
+      {!hasSchedule ? (
         <div className="no-selection">{t('generate_schedule_first')}</div>
       ) : (
         <div className="schedule-grid-container">
-          <table className="schedule-grid full-schedule">
+          <table className="schedule-grid full-schedule" id="schedule-table">
             <thead>
               <tr>
                 <th>{t('period')}</th>

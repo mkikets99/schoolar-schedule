@@ -169,5 +169,7 @@
   "generate": "Generate",
   "clear_schedule": "Clear Schedule",
   "confirm_clear_schedule": "Are you sure you want to clear the generated schedule? This cannot be undone.",
-  "build_date": "Build: {{date}}"
+  "build_date": "Build: {{date}}",
+  "export_xlsx": "Export as Excel (.xlsx)",
+  "export_pdf": "Export as PDF"
 }

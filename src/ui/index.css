@@ -866,6 +866,31 @@ tr.unassigned {
   color: #888;
 }
 
+.export-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.export-btn {
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background-color: #2a2a2a;
+  color: #aaa;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: all 0.15s;
+}
+
+.export-btn:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+  border-color: #646cff;
+}
+
 .conflict-count {
   color: #ff4d4d;
 }
