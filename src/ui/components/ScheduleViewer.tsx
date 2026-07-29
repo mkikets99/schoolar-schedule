@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { jsPDF } from 'jspdf';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { useProject } from '../context/ProjectContext';
 import { ensureFonts } from '../../utils/pdfFonts';
 
@@ -80,41 +80,147 @@ export const ScheduleViewer = () => {
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getRoomName = (id?: string) => rooms.find(r => r.id === id)?.name || '';
 
-  const formatCellText = (day: string, period: number, src: typeof schedule): string => {
-    const lessons = src.filter(l => l.day === day && l.period === period);
-    if (lessons.length === 0) return '';
-    return lessons.map(l => {
-      const parts = [getSubjectName(l.subjectId), getGroupName(l.groupId)];
-      if (l.teacherId) parts.push(getTeacherName(l.teacherId));
-      if (l.roomId) parts.push(getRoomName(l.roomId));
-      return parts.join(' | ');
-    }).join('\n');
-  };
+  const exportXLSX = useCallback(async () => {
+    const src = displayedLessons;
+    if (!src.length) return;
 
-  const buildGridData = (src: typeof schedule) => {
-    const usedPeriods = new Set<number>();
-    for (const lesson of src) usedPeriods.add(lesson.period);
-    const periods = [...usedPeriods].sort((a, b) => a - b);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Schedule');
 
-    const header = ['Period', ...days];
-    const rows: string[][] = [header];
-    for (const p of periods) {
-      rows.push([String(p), ...days.map(d => formatCellText(d, p, src))]);
+    for (let ci = 0; ci < 6; ci++) sheet.getColumn(ci + 1).width = ci === 0 ? 8 : 34;
+
+    const HEADER_BG = 'FF1E232D';
+    const ALT_BG = 'FFF4F6F9';
+    const BORDER_CLR = 'FFD2D6DC';
+    const b = () => ({ style: 'thin' as const, color: { argb: BORDER_CLR } });
+    const border = { top: b(), bottom: b(), left: b(), right: b() };
+
+    const SUBJ_PALETTE = [
+      'FFE5F1FF','FFFFE3E8','FFE1FAE1','FFFFFDD7',
+      'FFEEDEFF','FFFFEDD7','FFD7F5FF','FFFFF7D7',
+      'FFF5E1FF','FFD7FFF0',
+    ];
+    const subjColor = (id: string) => {
+      const i = subjects.findIndex(s => s.id === id);
+      return SUBJ_PALETTE[i >= 0 ? i % SUBJ_PALETTE.length : 0];
+    };
+
+    const periods = [...new Set(src.map(l => l.period))].sort((a, b) => a - b);
+    const dayLabels = days.map(d => t(d.toLowerCase()));
+
+    // Row 1 – school name
+    const r1 = sheet.getRow(1); r1.height = 24;
+    r1.getCell(1).value = schoolName;
+    r1.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1E1E1E' } };
+    sheet.mergeCells(1, 1, 1, 6);
+
+    // Row 2 – date
+    const r2 = sheet.getRow(2);
+    r2.getCell(1).value = `${t('schedule_title')} • ${new Date().toLocaleDateString()}`;
+    r2.getCell(1).font = { size: 10, color: { argb: 'FF787878' } };
+    sheet.mergeCells(2, 1, 2, 6);
+
+    // Row 3 – stats badges
+    const stats: { label: string; value: number | string; color: string }[] = [
+      { label: t('needed'), value: neededHours, color: 'FF5078C8' },
+      { label: t('assigned'), value: assignedHours, color: 'FF3CA050' },
+      { label: t('unassigned'), value: unassignedHours, color: unassignedHours > 0 ? 'FFDC8C28' : 'FF3CA050' },
+      { label: t('conflicts'), value: conflictKeys.size, color: conflictKeys.size > 0 ? 'FFDC3C3C' : 'FF3CA050' },
+      { label: t('score'), value: `${(score * 100).toFixed(0)}%`, color: score >= 1 ? 'FF3CA050' : score >= 0.5 ? 'FFC8A028' : 'FFDC5040' },
+    ];
+    for (let si = 0; si < stats.length; si++) {
+      const c = sheet.getRow(3).getCell(si + 1);
+      c.value = `${stats[si].label} ${stats[si].value}`;
+      c.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stats[si].color } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+      c.border = border;
     }
-    return rows;
-  };
 
-  const exportXLSX = useCallback(() => {
-    const data = buildGridData(displayedLessons);
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    // Row 5 – table header
+    const hr = sheet.getRow(5); hr.height = 22;
+    const hdrNames = [t('period'), ...dayLabels];
+    const hdrFont = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+    const hdrFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: HEADER_BG } };
+    for (let ci = 0; ci < 6; ci++) {
+      const c = hr.getCell(ci + 1);
+      c.value = hdrNames[ci];
+      c.font = hdrFont;
+      c.fill = hdrFill;
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+      c.border = border;
+    }
 
-    const colWidths = [{ wch: 8 }, ...days.map(() => ({ wch: 30 }))];
-    ws['!cols'] = colWidths;
+    // Data rows
+    for (let ri = 0; ri < periods.length; ri++) {
+      const period = periods[ri];
+      const row = sheet.getRow(6 + ri);
+      row.height = 30;
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
-    XLSX.writeFile(wb, `${schoolName.replace(/\s+/g, '_')}_schedule.xlsx`);
-  }, [displayedLessons, schoolName, days]);
+      const pc = row.getCell(1);
+      pc.value = period;
+      pc.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+      pc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
+      pc.alignment = { horizontal: 'center', vertical: 'middle' };
+      pc.border = border;
+
+      const isAlt = ri % 2 === 1;
+
+      for (let di = 0; di < 5; di++) {
+        const lessons = src.filter(l => l.day === days[di] && l.period === period);
+        const c = row.getCell(di + 2);
+        c.border = border;
+
+        if (lessons.length === 0) {
+          if (isAlt) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALT_BG } };
+          continue;
+        }
+
+        const isConfl = lessons.some(l => conflictKeys.has(l.id));
+
+        if (isConfl) {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDCDC' } };
+        } else {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subjColor(lessons[0].subjectId) } };
+        }
+
+        const richText: { text: string; font?: { bold?: boolean; size?: number; color?: { argb: string } } }[] = [];
+        for (let li = 0; li < lessons.length; li++) {
+          const l = lessons[li];
+          if (li > 0) { richText.push({ text: '\n' }); }
+          richText.push({ text: getSubjectName(l.subjectId), font: { bold: true, size: 10, color: { argb: 'FF1E1E1E' } } });
+          const detailParts = [getTeacherName(l.teacherId), getGroupName(l.groupId)];
+          if (l.roomId) detailParts.push(getRoomName(l.roomId));
+          richText.push({ text: '\n' + detailParts.join(' · '), font: { size: 8, color: { argb: 'FF666666' } } });
+        }
+        c.value = { richText };
+        c.alignment = { vertical: 'middle' };
+      }
+    }
+
+    // Legend
+    const legendRowNum = 6 + periods.length + 1;
+    const uSubj = [...new Set(src.map(l => l.subjectId))];
+    const lr = sheet.getRow(legendRowNum); lr.height = 18;
+    lr.getCell(1).value = t('legend') + ':';
+    lr.getCell(1).font = { bold: true, size: 8, color: { argb: 'FF505050' } };
+    for (let si = 0; si < uSubj.length; si++) {
+      const c = lr.getCell(si + 2);
+      c.value = getSubjectName(uSubj[si]);
+      c.font = { size: 8, color: { argb: 'FF3C3C3C' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subjColor(uSubj[si]) } };
+      c.border = border;
+    }
+
+    const buf = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${schoolName.replace(/\s+/g, '_')}_schedule.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [displayedLessons, schoolName, days, subjects, teachers, groups, rooms, conflictKeys, neededHours, assignedHours, unassignedHours, score, t]);
 
   const exportPDF = useCallback(async () => {
     const src = displayedLessons;
