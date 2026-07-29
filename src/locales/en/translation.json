@@ -172,6 +172,7 @@
   "build_date": "Build: {{date}}",
   "export_xlsx": "Export as Excel (.xlsx)",
   "export_pdf": "Export as PDF",
+  "export_overview": "Overview",
   "schedule_title": "Schedule",
   "monday": "Monday",
   "tuesday": "Tuesday",

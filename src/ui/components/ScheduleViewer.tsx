@@ -79,8 +79,8 @@ export const ScheduleViewer = () => {
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getRoomName = (id?: string) => rooms.find(r => r.id === id)?.name || '';
 
-  const formatCellText = (day: string, period: number): string => {
-    const lessons = schedule.filter(l => l.day === day && l.period === period);
+  const formatCellText = (day: string, period: number, src: typeof schedule): string => {
+    const lessons = src.filter(l => l.day === day && l.period === period);
     if (lessons.length === 0) return '';
     return lessons.map(l => {
       const parts = [getSubjectName(l.subjectId), getGroupName(l.groupId)];
@@ -90,21 +90,21 @@ export const ScheduleViewer = () => {
     }).join('\n');
   };
 
-  const buildGridData = () => {
+  const buildGridData = (src: typeof schedule) => {
     const usedPeriods = new Set<number>();
-    for (const lesson of schedule) usedPeriods.add(lesson.period);
+    for (const lesson of src) usedPeriods.add(lesson.period);
     const periods = [...usedPeriods].sort((a, b) => a - b);
 
     const header = ['Period', ...days];
     const rows: string[][] = [header];
     for (const p of periods) {
-      rows.push([String(p), ...days.map(d => formatCellText(d, p))]);
+      rows.push([String(p), ...days.map(d => formatCellText(d, p, src))]);
     }
     return rows;
   };
 
   const exportXLSX = useCallback(() => {
-    const data = buildGridData();
+    const data = buildGridData(displayedLessons);
     const ws = XLSX.utils.aoa_to_sheet(data);
 
     const colWidths = [{ wch: 8 }, ...days.map(() => ({ wch: 30 }))];
@@ -113,10 +113,11 @@ export const ScheduleViewer = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
     XLSX.writeFile(wb, `${schoolName.replace(/\s+/g, '_')}_schedule.xlsx`);
-  }, [schedule, schoolName, days]);
+  }, [displayedLessons, schoolName, days]);
 
   const exportPDF = useCallback(() => {
-    if (!schedule.length) return;
+    const src = displayedLessons;
+    if (!src.length) return;
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const M = 10;
@@ -141,13 +142,13 @@ export const ScheduleViewer = () => {
     const dayColW = (pageW - M * 2 - periodColW) / 5;
 
     const getLessons = (day: string, period: number) =>
-      schedule.filter(l => l.day === day && l.period === period);
+      src.filter(l => l.day === day && l.period === period);
 
     const statLabel = (key: string) => t(key);
 
     const dayLabels = days.map(d => t(d.toLowerCase()));
 
-    const periods = [...new Set(schedule.map(l => l.period))].sort((a, b) => a - b);
+    const periods = [...new Set(src.map(l => l.period))].sort((a, b) => a - b);
 
     const computeRowHeight = (period: number) => {
       let maxH = 10;
@@ -224,21 +225,17 @@ export const ScheduleViewer = () => {
 
               const isConfl = conflictKeys.has(l.id);
 
-              // lesson background
               const bg = subjColor(l.subjectId);
               drawCellBg(lx, ly, lw, lh, isConfl ? [255, 220, 220] : bg);
 
-              // thin left accent
               doc.setFillColor(isConfl ? 200 : 100, isConfl ? 60 : 130, isConfl ? 60 : 180);
               doc.rect(lx, ly, 1.5, lh, 'F');
 
-              // subject name
               doc.setTextColor(30, 30, 30);
               doc.setFont('helvetica', 'bold');
               doc.setFontSize(6);
               doc.text(getSubjectName(l.subjectId), lx + 2.5, ly + 2.8);
 
-              // details
               const detailParts = [getTeacherName(l.teacherId), getGroupName(l.groupId)];
               if (l.roomId) detailParts.push(getRoomName(l.roomId));
               doc.setTextColor(100, 100, 100);
@@ -246,7 +243,6 @@ export const ScheduleViewer = () => {
               doc.setFontSize(4.5);
               doc.text(detailParts.join(' · '), lx + 2.5, ly + lh - 2);
 
-              // conflict mark
               if (isConfl) {
                 doc.setTextColor(200, 50, 50);
                 doc.setFont('helvetica', 'bold');
@@ -263,13 +259,11 @@ export const ScheduleViewer = () => {
       return rowY;
     };
 
-    // ---- compute layout ----
     let totalTableH = headerH + rowHeights.reduce((s, h) => s + h, 0);
     const titleBlockH = 30;
     const legendH = 12;
     let neededH = titleBlockH + totalTableH + legendH + 5;
 
-    // ---- title block ----
     let cursorY = M;
     doc.setTextColor(30, 30, 30);
     doc.setFont('helvetica', 'bold');
@@ -284,7 +278,6 @@ export const ScheduleViewer = () => {
     doc.text(`${t('schedule_title')} • ${dateStr}`, M, cursorY + 2);
     cursorY += 9;
 
-    // stats badges
     doc.setFontSize(7);
     const stats: [string, number | string, [number, number, number]][] = [
       [statLabel('needed'), neededHours, [80, 120, 200]],
@@ -305,13 +298,9 @@ export const ScheduleViewer = () => {
     }
     cursorY += 13;
 
-    // ---- table ----
     const tableStartY = cursorY;
-
-    // check if we need multiple pages
     const availableH = pageH - M - legendH - 3;
     if (neededH > pageH - M) {
-      // need to split
       let pageStart = 0;
       let pageCursorY = tableStartY;
       let pageTop = tableStartY;
@@ -332,7 +321,6 @@ export const ScheduleViewer = () => {
       cursorY = drawPage(0, periods.length, tableStartY);
     }
 
-    // ---- legend ----
     cursorY += 3;
     if (cursorY > pageH - M - 2) {
       doc.addPage();
@@ -350,7 +338,7 @@ export const ScheduleViewer = () => {
     doc.text(t('legend') + ': ', lx, cursorY + 6.5);
     lx += doc.getTextWidth(t('legend') + ': ') + 2;
 
-    const uniqueSubjects = [...new Set(schedule.map(l => l.subjectId))];
+    const uniqueSubjects = [...new Set(src.map(l => l.subjectId))];
     for (const sid of uniqueSubjects) {
       const color = subjColor(sid);
       const name = getSubjectName(sid);
@@ -370,7 +358,6 @@ export const ScheduleViewer = () => {
       }
     }
 
-    // ---- page numbers ----
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
@@ -381,7 +368,136 @@ export const ScheduleViewer = () => {
     }
 
     doc.save(`${schoolName.replace(/\s+/g, '_')}_schedule.pdf`);
-  }, [schedule, schoolName, days, subjects, teachers, groups, rooms, conflictKeys, neededHours, assignedHours, unassignedHours, score, t]);
+  }, [displayedLessons, schoolName, days, subjects, teachers, groups, rooms, conflictKeys, neededHours, assignedHours, unassignedHours, score, t]);
+
+  const exportOverview = useCallback(() => {
+    if (!schedule.length) return;
+
+    const groupIds = [...new Set(schedule.map(l => l.groupId))].sort((a, b) =>
+      getGroupName(a).localeCompare(getGroupName(b))
+    );
+
+    const slots = [...new Set(schedule.map(l => `${l.day}|${l.period}`))].sort((a, b) => {
+      const [da, pa] = a.split('|');
+      const [db, pb] = b.split('|');
+      const ia = days.indexOf(da);
+      const ib = days.indexOf(db);
+      return ia !== ib ? ia - ib : Number(pa) - Number(pb);
+    });
+
+    const cellText = new Map<string, string>();
+    for (const l of schedule) {
+      const key = `${l.groupId}|${l.day}|${l.period}`;
+      const subj = getSubjectName(l.subjectId);
+      if (cellText.has(key)) continue;
+      cellText.set(key, subj);
+    }
+
+    const getCell = (gid: string, day: string, period: number) =>
+      cellText.get(`${gid}|${day}|${period}`) || '';
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const M = 6;
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const rowLabelW = 10;
+    const rowH = 4.2;
+    const headerH = 8;
+    const titleH = 11;
+    const dayLabels = days.map(d => t(d.toLowerCase()));
+
+    const maxGroupsPerPage = Math.max(1, Math.floor((pageW - M * 2 - rowLabelW) / 12));
+    const maxRowsPerPage = Math.max(1, Math.floor((pageH - M * 2 - titleH - headerH) / rowH));
+
+    const groupChunks: string[][] = [];
+    for (let i = 0; i < groupIds.length; i += maxGroupsPerPage) groupChunks.push(groupIds.slice(i, i + maxGroupsPerPage));
+    const slotChunks: string[][] = [];
+    for (let i = 0; i < slots.length; i += maxRowsPerPage) slotChunks.push(slots.slice(i, i + maxRowsPerPage));
+
+    for (let gc = 0; gc < groupChunks.length; gc++) {
+      for (let sc = 0; sc < slotChunks.length; sc++) {
+        if (gc > 0 || sc > 0) doc.addPage();
+
+        const chunkGroups = groupChunks[gc];
+        const chunkSlots = slotChunks[sc];
+        const colW = Math.min(28, (pageW - M * 2 - rowLabelW) / chunkGroups.length);
+
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 30, 30);
+        doc.text(schoolName, M, M + 4);
+        doc.setFontSize(6);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(120, 120, 120);
+        doc.text(`${t('export_overview')} • ${new Date().toLocaleDateString()}`, M, M + 8);
+
+        const tableTop = M + titleH;
+
+        doc.setFillColor(50, 58, 69);
+        doc.setTextColor(255, 255, 255);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.rect(M, tableTop, rowLabelW, headerH, 'F');
+        doc.text(t('period'), M + rowLabelW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
+
+        for (let gi = 0; gi < chunkGroups.length; gi++) {
+          const x = M + rowLabelW + gi * colW;
+          doc.rect(x, tableTop, colW, headerH, 'F');
+          doc.text(getGroupName(chunkGroups[gi]), x + colW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
+        }
+
+        let rowY = tableTop + headerH;
+        for (const slotKey of chunkSlots) {
+          const [day, perStr] = slotKey.split('|');
+          const period = Number(perStr);
+          const di = days.indexOf(day);
+          const label = `${dayLabels[di]} ${period}`;
+          const isAlt = (slots.indexOf(slotKey)) % 2 === 1;
+
+          if (isAlt) {
+            doc.setFillColor(244, 246, 249);
+            doc.rect(M, rowY, rowLabelW + chunkGroups.length * colW, rowH, 'F');
+          }
+
+          doc.setDrawColor(210, 214, 220);
+          doc.setFillColor(50, 58, 69);
+          doc.setTextColor(255, 255, 255);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(5);
+          doc.rect(M, rowY, rowLabelW, rowH, 'FD');
+          doc.text(label, M + rowLabelW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
+
+          for (let gi = 0; gi < chunkGroups.length; gi++) {
+            const cx = M + rowLabelW + gi * colW;
+            const text = getCell(chunkGroups[gi], day, period);
+
+            doc.setDrawColor(210, 214, 220);
+            doc.rect(cx, rowY, colW, rowH, 'S');
+
+            if (text) {
+              doc.setTextColor(30, 30, 30);
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(4.5);
+              doc.text(text, cx + colW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
+            }
+          }
+
+          rowY += rowH;
+        }
+      }
+    }
+
+    const totalPages = doc.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setTextColor(180, 180, 180);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(6);
+      doc.text(`${i} / ${totalPages}`, pageW - M, pageH - 4, { align: 'right' });
+    }
+
+    doc.save(`${schoolName.replace(/\s+/g, '_')}_overview.pdf`);
+  }, [schedule, schoolName, days, subjects, groups, t]);
 
   const toggleLock = (lessonId: string) => {
     setLockedLessons(prev => {
@@ -430,6 +546,7 @@ export const ScheduleViewer = () => {
           <div className="export-actions">
             <button onClick={exportXLSX} className="export-btn" title={t('export_xlsx')}>XLSX</button>
             <button onClick={exportPDF} className="export-btn" title={t('export_pdf')}>PDF</button>
+            <button onClick={exportOverview} className="export-btn" title={t('export_overview')}>{t('export_overview')}</button>
           </div>
         )}
       </div>

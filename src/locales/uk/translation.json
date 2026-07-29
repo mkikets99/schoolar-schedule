@@ -168,6 +168,7 @@
   "build_date": "Збірка: {{date}}",
   "export_xlsx": "Експорт у Excel (.xlsx)",
   "export_pdf": "Експорт у PDF",
+  "export_overview": "Огляд",
   "schedule_title": "Розклад",
   "monday": "Понеділок",
   "tuesday": "Вівторок",
