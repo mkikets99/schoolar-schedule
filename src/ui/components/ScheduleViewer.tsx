@@ -84,10 +84,34 @@ export const ScheduleViewer = () => {
     const src = displayedLessons;
     if (!src.length) return;
 
+    const groupIds = [...new Set(src.map(l => l.groupId))].sort((a, b) =>
+      getGroupName(a).localeCompare(getGroupName(b))
+    );
+    if (!groupIds.length) return;
+
+    const dayPeriods = new Map<string, number[]>();
+    for (const day of days) dayPeriods.set(day, []);
+    for (const l of src) {
+      const list = dayPeriods.get(l.day)!;
+      if (!list.includes(l.period)) list.push(l.period);
+    }
+    for (const day of days) dayPeriods.get(day)!.sort((a, b) => a - b);
+    const usedDays = days.filter(d => (dayPeriods.get(d)?.length ?? 0) > 0);
+
+    const cellLessons = new Map<string, typeof src>();
+    for (const l of src) {
+      const key = `${l.groupId}|${l.day}|${l.period}`;
+      if (!cellLessons.has(key)) cellLessons.set(key, []);
+      cellLessons.get(key)!.push(l);
+    }
+
+    const totalCols = 2 + groupIds.length;
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Schedule');
 
-    for (let ci = 0; ci < 6; ci++) sheet.getColumn(ci + 1).width = ci === 0 ? 8 : 34;
+    for (let ci = 0; ci < totalCols; ci++) {
+      sheet.getColumn(ci + 1).width = ci === 0 ? 10 : ci === 1 ? 5 : 26;
+    }
 
     const HEADER_BG = 'FF1E232D';
     const ALT_BG = 'FFF4F6F9';
@@ -105,20 +129,19 @@ export const ScheduleViewer = () => {
       return SUBJ_PALETTE[i >= 0 ? i % SUBJ_PALETTE.length : 0];
     };
 
-    const periods = [...new Set(src.map(l => l.period))].sort((a, b) => a - b);
     const dayLabels = days.map(d => t(d.toLowerCase()));
 
     // Row 1 – school name
     const r1 = sheet.getRow(1); r1.height = 24;
     r1.getCell(1).value = schoolName;
     r1.getCell(1).font = { bold: true, size: 14, color: { argb: 'FF1E1E1E' } };
-    sheet.mergeCells(1, 1, 1, 6);
+    sheet.mergeCells(1, 1, 1, totalCols);
 
     // Row 2 – date
     const r2 = sheet.getRow(2);
     r2.getCell(1).value = `${t('schedule_title')} • ${new Date().toLocaleDateString()}`;
     r2.getCell(1).font = { size: 10, color: { argb: 'FF787878' } };
-    sheet.mergeCells(2, 1, 2, 6);
+    sheet.mergeCells(2, 1, 2, totalCols);
 
     // Row 3 – stats badges
     const stats: { label: string; value: number | string; color: string }[] = [
@@ -137,12 +160,12 @@ export const ScheduleViewer = () => {
       c.border = border;
     }
 
-    // Row 5 – table header
+    // Row 5 – table header (dark, overview matrix style)
     const hr = sheet.getRow(5); hr.height = 22;
-    const hdrNames = [t('period'), ...dayLabels];
+    const hdrNames = [t('day'), '#', ...groupIds.map(gid => getGroupName(gid))];
     const hdrFont = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
     const hdrFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: HEADER_BG } };
-    for (let ci = 0; ci < 6; ci++) {
+    for (let ci = 0; ci < totalCols; ci++) {
       const c = hr.getCell(ci + 1);
       c.value = hdrNames[ci];
       c.font = hdrFont;
@@ -151,60 +174,90 @@ export const ScheduleViewer = () => {
       c.border = border;
     }
 
-    // Data rows
-    for (let ri = 0; ri < periods.length; ri++) {
-      const period = periods[ri];
-      const row = sheet.getRow(6 + ri);
-      row.height = 30;
+    // Data rows (overview matrix layout)
+    let dataRowNum = 6;
+    const dataStartRow = dataRowNum;
 
-      const pc = row.getCell(1);
-      pc.value = period;
-      pc.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
-      pc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
-      pc.alignment = { horizontal: 'center', vertical: 'middle' };
-      pc.border = border;
+    for (let di = 0; di < usedDays.length; di++) {
+      const day = usedDays[di];
+      const periods = dayPeriods.get(day)!;
+      const dayLabel = dayLabels[days.indexOf(day)];
+      const dayStartRow = dataRowNum;
 
-      const isAlt = ri % 2 === 1;
+      for (let pi = 0; pi < periods.length; pi++) {
+        const period = periods[pi];
+        const row = sheet.getRow(dataRowNum);
+        row.height = 28;
 
-      for (let di = 0; di < 5; di++) {
-        const lessons = src.filter(l => l.day === days[di] && l.period === period);
-        const c = row.getCell(di + 2);
-        c.border = border;
+        const isAlt = (dataRowNum - dataStartRow) % 2 === 1;
 
-        if (lessons.length === 0) {
-          if (isAlt) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALT_BG } };
-          continue;
+        // Period number cell
+        const pc = row.getCell(2);
+        pc.value = period;
+        pc.font = { bold: true, size: 9, color: { argb: 'FF505050' } };
+        pc.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (isAlt) pc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALT_BG } };
+        pc.border = border;
+
+        // Group columns
+        for (let gi = 0; gi < groupIds.length; gi++) {
+          const gid = groupIds[gi];
+          const c = row.getCell(gi + 3);
+          c.border = border;
+
+          const lessons = cellLessons.get(`${gid}|${day}|${period}`);
+          if (!lessons) {
+            if (isAlt) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ALT_BG } };
+            continue;
+          }
+
+          const isConfl = lessons.some(l => conflictKeys.has(l.id));
+          if (isConfl) {
+            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDCDC' } };
+          } else {
+            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subjColor(lessons[0].subjectId) } };
+          }
+
+          const richText: { text: string; font?: { bold?: boolean; size?: number; color?: { argb: string } } }[] = [];
+          for (let li = 0; li < lessons.length; li++) {
+            const l = lessons[li];
+            if (li > 0) richText.push({ text: '\n' });
+            richText.push({ text: getSubjectName(l.subjectId), font: { bold: true, size: 10, color: { argb: 'FF1E1E1E' } } });
+            const details = [getTeacherName(l.teacherId)];
+            if (l.roomId) details.push(getRoomName(l.roomId));
+            richText.push({ text: '\n' + details.join(' · '), font: { size: 8, color: { argb: 'FF666666' } } });
+          }
+          c.value = { richText };
+          c.alignment = { vertical: 'middle' };
         }
 
-        const isConfl = lessons.some(l => conflictKeys.has(l.id));
-
-        if (isConfl) {
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFDCDC' } };
-        } else {
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: subjColor(lessons[0].subjectId) } };
-        }
-
-        const richText: { text: string; font?: { bold?: boolean; size?: number; color?: { argb: string } } }[] = [];
-        for (let li = 0; li < lessons.length; li++) {
-          const l = lessons[li];
-          if (li > 0) { richText.push({ text: '\n' }); }
-          richText.push({ text: getSubjectName(l.subjectId), font: { bold: true, size: 10, color: { argb: 'FF1E1E1E' } } });
-          const detailParts = [getTeacherName(l.teacherId), getGroupName(l.groupId)];
-          if (l.roomId) detailParts.push(getRoomName(l.roomId));
-          richText.push({ text: '\n' + detailParts.join(' · '), font: { size: 8, color: { argb: 'FF666666' } } });
-        }
-        c.value = { richText };
-        c.alignment = { vertical: 'middle' };
+        dataRowNum++;
       }
+
+      // Merge day cells across all periods of this day
+      if (periods.length > 1) {
+        for (let r = dayStartRow; r < dayStartRow + periods.length; r++) {
+          sheet.getRow(r).getCell(1).border = border;
+        }
+        sheet.mergeCells(dayStartRow, 1, dayStartRow + periods.length - 1, 1);
+      }
+
+      // Style day label (top-left cell of the merged block)
+      const dayCell = sheet.getRow(dayStartRow).getCell(1);
+      dayCell.value = dayLabel;
+      dayCell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+      dayCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_BG } };
+      dayCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      dayCell.border = border;
     }
 
     // Legend
-    const legendRowNum = 6 + periods.length + 1;
+    const legendRowNum = dataStartRow + (usedDays.reduce((s, d) => s + (dayPeriods.get(d)?.length ?? 0), 0)) + 1;
     const uSubj = [...new Set(src.map(l => l.subjectId))];
     const lr = sheet.getRow(legendRowNum); lr.height = 18;
     lr.getCell(1).value = t('legend') + ':';
     lr.getCell(1).font = { bold: true, size: 8, color: { argb: 'FF505050' } };
-    for (let si = 0; si < uSubj.length; si++) {
+    for (let si = 0; si < uSubj.length && si + 2 <= totalCols; si++) {
       const c = lr.getCell(si + 2);
       c.value = getSubjectName(uSubj[si]);
       c.font = { size: 8, color: { argb: 'FF3C3C3C' } };
