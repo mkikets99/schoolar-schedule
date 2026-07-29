@@ -7,7 +7,7 @@ self.onmessage = (event) => {
     case 'INIT':
       self.postMessage({
         type: 'READY',
-        payload: { version: __APP_VERSION__, buildDate: __BUILD_DATE__ },
+        payload: { version: __APP_VERSION__, buildDate: __BUILD_DATE__, buildVersion: __BUILD_VERSION__ },
       });
       break;
 
