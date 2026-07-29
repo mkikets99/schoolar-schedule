@@ -18,7 +18,7 @@ function AppContent() {
   const { t, i18n } = useTranslation();
   const { project, isLoading, updateGeneratedSchedule, clearGeneratedSchedule } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
-  const [workerBuildDate, setWorkerBuildDate] = useState<string>('');
+  const [workerVersion, setWorkerVersion] = useState<string>('');
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
   const workerRef = useRef<Worker | null>(null);
 
@@ -31,7 +31,7 @@ function AppContent() {
       const { type, payload } = event.data;
       if (type === 'READY') {
         setWorkerStatus(t('worker_ready'));
-        setWorkerBuildDate(payload?.buildDate ?? '');
+        setWorkerVersion(payload?.version ?? '');
         setWorkerBuildVersion(payload?.buildVersion ?? '');
       } else if (type === 'PROGRESS') {
         setWorkerStatus(`${t('generating')} ${payload.progress}%`);
@@ -114,9 +114,9 @@ function AppContent() {
           </select>
           <div className="status-bar">
             <span>{workerStatus}</span>
-            {workerBuildVersion && (
-              <span className="worker-version" title={t('build_date', { date: workerBuildDate })}>
-                {workerBuildVersion}
+            {workerVersion && (
+              <span className="worker-version" title={workerBuildVersion}>
+                v{workerVersion}
               </span>
             )}
           </div>
