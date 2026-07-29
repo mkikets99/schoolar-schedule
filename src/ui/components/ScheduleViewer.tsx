@@ -446,18 +446,17 @@ export const ScheduleViewer = () => {
 
         const tableTop = M + titleH;
 
-        doc.setFillColor(50, 58, 69);
+        doc.setDrawColor(30, 35, 45);
+        doc.setFillColor(30, 35, 45);
         doc.setTextColor(255, 255, 255);
         doc.setFont('DejaVuSans', 'bold');
         doc.setFontSize(5.5);
-        doc.rect(M, tableTop, dayColW, headerH, 'F');
+        doc.rect(M, tableTop, dayColW + perColW + chunkGroups.length * colW, headerH, 'FD');
         doc.text(t('day'), M + dayColW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
-        doc.rect(M + dayColW, tableTop, perColW, headerH, 'F');
         doc.text('#', M + dayColW + perColW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
 
         for (let gi = 0; gi < chunkGroups.length; gi++) {
           const x = M + labelW + gi * colW;
-          doc.rect(x, tableTop, colW, headerH, 'F');
           doc.text(getGroupName(chunkGroups[gi]), x + colW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
         }
 
@@ -472,7 +471,8 @@ export const ScheduleViewer = () => {
 
           if (isNewDay && prevDay) {
             const spanH = daySpanRows * rowH;
-            doc.setFillColor(50, 58, 69);
+            doc.setDrawColor(30, 35, 45);
+            doc.setFillColor(30, 35, 45);
             doc.setTextColor(255, 255, 255);
             doc.setFont('DejaVuSans', 'bold');
             doc.setFontSize(5);
@@ -520,7 +520,8 @@ export const ScheduleViewer = () => {
 
         if (prevDay) {
           const spanH = daySpanRows * rowH;
-          doc.setFillColor(50, 58, 69);
+          doc.setDrawColor(30, 35, 45);
+          doc.setFillColor(30, 35, 45);
           doc.setTextColor(255, 255, 255);
           doc.setFont('DejaVuSans', 'bold');
           doc.setFontSize(5);
