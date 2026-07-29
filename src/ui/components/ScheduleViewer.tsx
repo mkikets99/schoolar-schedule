@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
 import { useProject } from '../context/ProjectContext';
+import { ensureFonts } from '../../utils/pdfFonts';
 
 export const ScheduleViewer = () => {
   const { t } = useTranslation();
@@ -115,11 +116,12 @@ export const ScheduleViewer = () => {
     XLSX.writeFile(wb, `${schoolName.replace(/\s+/g, '_')}_schedule.xlsx`);
   }, [displayedLessons, schoolName, days]);
 
-  const exportPDF = useCallback(() => {
+  const exportPDF = useCallback(async () => {
     const src = displayedLessons;
     if (!src.length) return;
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    await ensureFonts(doc);
     const M = 10;
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
@@ -174,7 +176,7 @@ export const ScheduleViewer = () => {
       doc.setDrawColor(...BORDER);
       doc.setFillColor(...HEADER_BG);
       doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('DejaVuSans', 'bold');
       doc.setFontSize(7);
 
       doc.rect(M, headerY, periodColW, headerH, 'FD');
@@ -201,7 +203,7 @@ export const ScheduleViewer = () => {
         doc.setDrawColor(...BORDER);
         doc.setFillColor(...HEADER_BG);
         doc.setTextColor(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('DejaVuSans', 'bold');
         doc.setFontSize(8);
         doc.rect(M, rowY, periodColW, rh, 'FD');
         doc.text(String(period), M + periodColW / 2, rowY + rh / 2 + 1.5, { align: 'center' });
@@ -232,20 +234,20 @@ export const ScheduleViewer = () => {
               doc.rect(lx, ly, 1.5, lh, 'F');
 
               doc.setTextColor(30, 30, 30);
-              doc.setFont('helvetica', 'bold');
+              doc.setFont('DejaVuSans', 'bold');
               doc.setFontSize(6);
               doc.text(getSubjectName(l.subjectId), lx + 2.5, ly + 2.8);
 
               const detailParts = [getTeacherName(l.teacherId), getGroupName(l.groupId)];
               if (l.roomId) detailParts.push(getRoomName(l.roomId));
               doc.setTextColor(100, 100, 100);
-              doc.setFont('helvetica', 'normal');
+              doc.setFont('DejaVuSans', 'normal');
               doc.setFontSize(4.5);
               doc.text(detailParts.join(' · '), lx + 2.5, ly + lh - 2);
 
               if (isConfl) {
                 doc.setTextColor(200, 50, 50);
-                doc.setFont('helvetica', 'bold');
+                doc.setFont('DejaVuSans', 'bold');
                 doc.setFontSize(7);
                 doc.text('!', lx + lw - 3.5, ly + 3);
               }
@@ -266,12 +268,12 @@ export const ScheduleViewer = () => {
 
     let cursorY = M;
     doc.setTextColor(30, 30, 30);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont('DejaVuSans', 'bold');
     doc.setFontSize(16);
     doc.text(schoolName, M, cursorY + 8);
     cursorY += 10;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('DejaVuSans', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(120, 120, 120);
     const dateStr = new Date().toLocaleDateString();
@@ -290,7 +292,7 @@ export const ScheduleViewer = () => {
     for (const [label, value, color] of stats) {
       doc.setFillColor(...color);
       doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont('DejaVuSans', 'bold');
       const sw = 30;
       doc.roundedRect(sx, cursorY, sw, 7, 1.5, 1.5, 'F');
       doc.text(`${label} ${value}`, sx + sw / 2, cursorY + 4.5, { align: 'center' });
@@ -332,7 +334,7 @@ export const ScheduleViewer = () => {
     doc.roundedRect(M, cursorY, pageW - M * 2, 10, 2, 2, 'FD');
 
     doc.setTextColor(80, 80, 80);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont('DejaVuSans', 'normal');
     doc.setFontSize(6);
     let lx = M + 3;
     doc.text(t('legend') + ': ', lx, cursorY + 6.5);
@@ -347,7 +349,7 @@ export const ScheduleViewer = () => {
       doc.setDrawColor(...BORDER);
       doc.rect(lx, cursorY + 3, 6, 4.5, 'S');
       doc.setTextColor(60, 60, 60);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('DejaVuSans', 'normal');
       doc.setFontSize(5.5);
       doc.text(name, lx + 8, cursorY + 6.5);
 
@@ -362,7 +364,7 @@ export const ScheduleViewer = () => {
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       doc.setTextColor(180, 180, 180);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('DejaVuSans', 'normal');
       doc.setFontSize(7);
       doc.text(`${i} / ${totalPages}`, pageW - M, pageH - 5, { align: 'right' });
     }
@@ -370,7 +372,7 @@ export const ScheduleViewer = () => {
     doc.save(`${schoolName.replace(/\s+/g, '_')}_schedule.pdf`);
   }, [displayedLessons, schoolName, days, subjects, teachers, groups, rooms, conflictKeys, neededHours, assignedHours, unassignedHours, score, t]);
 
-  const exportOverview = useCallback(() => {
+  const exportOverview = useCallback(async () => {
     if (!schedule.length) return;
 
     const groupIds = [...new Set(schedule.map(l => l.groupId))].sort((a, b) =>
@@ -397,6 +399,7 @@ export const ScheduleViewer = () => {
       cellText.get(`${gid}|${day}|${period}`) || '';
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    await ensureFonts(doc);
     const M = 6;
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
@@ -423,11 +426,11 @@ export const ScheduleViewer = () => {
         const colW = Math.min(28, (pageW - M * 2 - rowLabelW) / chunkGroups.length);
 
         doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('DejaVuSans', 'bold');
         doc.setTextColor(30, 30, 30);
         doc.text(schoolName, M, M + 4);
         doc.setFontSize(6);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('DejaVuSans', 'normal');
         doc.setTextColor(120, 120, 120);
         doc.text(`${t('export_overview')} • ${new Date().toLocaleDateString()}`, M, M + 8);
 
@@ -435,7 +438,7 @@ export const ScheduleViewer = () => {
 
         doc.setFillColor(50, 58, 69);
         doc.setTextColor(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont('DejaVuSans', 'bold');
         doc.setFontSize(5.5);
         doc.rect(M, tableTop, rowLabelW, headerH, 'F');
         doc.text(t('period'), M + rowLabelW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
@@ -462,7 +465,7 @@ export const ScheduleViewer = () => {
           doc.setDrawColor(210, 214, 220);
           doc.setFillColor(50, 58, 69);
           doc.setTextColor(255, 255, 255);
-          doc.setFont('helvetica', 'bold');
+          doc.setFont('DejaVuSans', 'bold');
           doc.setFontSize(5);
           doc.rect(M, rowY, rowLabelW, rowH, 'FD');
           doc.text(label, M + rowLabelW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
@@ -476,7 +479,7 @@ export const ScheduleViewer = () => {
 
             if (text) {
               doc.setTextColor(30, 30, 30);
-              doc.setFont('helvetica', 'bold');
+              doc.setFont('DejaVuSans', 'bold');
               doc.setFontSize(4.5);
               doc.text(text, cx + colW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
             }
@@ -491,7 +494,7 @@ export const ScheduleViewer = () => {
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       doc.setTextColor(180, 180, 180);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('DejaVuSans', 'normal');
       doc.setFontSize(6);
       doc.text(`${i} / ${totalPages}`, pageW - M, pageH - 4, { align: 'right' });
     }
