@@ -379,22 +379,21 @@ export const ScheduleViewer = () => {
       getGroupName(a).localeCompare(getGroupName(b))
     );
 
-    const slots = [...new Set(schedule.map(l => `${l.day}|${l.period}`))].sort((a, b) => {
-      const [da, pa] = a.split('|');
-      const [db, pb] = b.split('|');
-      const ia = days.indexOf(da);
-      const ib = days.indexOf(db);
-      return ia !== ib ? ia - ib : Number(pa) - Number(pb);
-    });
+    const dayPeriods = new Map<string, number[]>();
+    for (const day of days) dayPeriods.set(day, []);
+    for (const l of schedule) {
+      const list = dayPeriods.get(l.day)!;
+      if (!list.includes(l.period)) list.push(l.period);
+    }
+    for (const day of days) dayPeriods.get(day)!.sort((a, b) => a - b);
+
+    const usedDays = days.filter(d => (dayPeriods.get(d)?.length ?? 0) > 0);
 
     const cellText = new Map<string, string>();
     for (const l of schedule) {
       const key = `${l.groupId}|${l.day}|${l.period}`;
-      const subj = getSubjectName(l.subjectId);
-      if (cellText.has(key)) continue;
-      cellText.set(key, subj);
+      if (!cellText.has(key)) cellText.set(key, getSubjectName(l.subjectId));
     }
-
     const getCell = (gid: string, day: string, period: number) =>
       cellText.get(`${gid}|${day}|${period}`) || '';
 
@@ -403,27 +402,38 @@ export const ScheduleViewer = () => {
     const M = 6;
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
-    const rowLabelW = 10;
+    const dayColW = 8;
+    const perColW = 5;
+    const labelW = dayColW + perColW;
     const rowH = 4.2;
     const headerH = 8;
     const titleH = 11;
     const dayLabels = days.map(d => t(d.toLowerCase()));
 
-    const maxGroupsPerPage = Math.max(1, Math.floor((pageW - M * 2 - rowLabelW) / 12));
+    const maxGroupsPerPage = Math.max(1, Math.floor((pageW - M * 2 - labelW) / 12));
     const maxRowsPerPage = Math.max(1, Math.floor((pageH - M * 2 - titleH - headerH) / rowH));
 
     const groupChunks: string[][] = [];
     for (let i = 0; i < groupIds.length; i += maxGroupsPerPage) groupChunks.push(groupIds.slice(i, i + maxGroupsPerPage));
-    const slotChunks: string[][] = [];
-    for (let i = 0; i < slots.length; i += maxRowsPerPage) slotChunks.push(slots.slice(i, i + maxRowsPerPage));
+    const rowChunks: { day: string; period: number }[][] = [];
+    let cur: { day: string; period: number }[] = [];
+    let ri = 0;
+    for (const day of usedDays) {
+      for (const period of dayPeriods.get(day)!) {
+        if (ri > 0 && ri % maxRowsPerPage === 0) { rowChunks.push(cur); cur = []; }
+        cur.push({ day, period });
+        ri++;
+      }
+    }
+    if (cur.length) rowChunks.push(cur);
 
     for (let gc = 0; gc < groupChunks.length; gc++) {
-      for (let sc = 0; sc < slotChunks.length; sc++) {
-        if (gc > 0 || sc > 0) doc.addPage();
+      for (let rc = 0; rc < rowChunks.length; rc++) {
+        if (gc > 0 || rc > 0) doc.addPage();
 
         const chunkGroups = groupChunks[gc];
-        const chunkSlots = slotChunks[sc];
-        const colW = Math.min(28, (pageW - M * 2 - rowLabelW) / chunkGroups.length);
+        const chunkRows = rowChunks[rc];
+        const colW = Math.min(28, (pageW - M * 2 - labelW) / chunkGroups.length);
 
         doc.setFontSize(10);
         doc.setFont('DejaVuSans', 'bold');
@@ -440,38 +450,58 @@ export const ScheduleViewer = () => {
         doc.setTextColor(255, 255, 255);
         doc.setFont('DejaVuSans', 'bold');
         doc.setFontSize(5.5);
-        doc.rect(M, tableTop, rowLabelW, headerH, 'F');
-        doc.text(t('period'), M + rowLabelW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
+        doc.rect(M, tableTop, dayColW, headerH, 'F');
+        doc.text(t('day'), M + dayColW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
+        doc.rect(M + dayColW, tableTop, perColW, headerH, 'F');
+        doc.text('#', M + dayColW + perColW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
 
         for (let gi = 0; gi < chunkGroups.length; gi++) {
-          const x = M + rowLabelW + gi * colW;
+          const x = M + labelW + gi * colW;
           doc.rect(x, tableTop, colW, headerH, 'F');
           doc.text(getGroupName(chunkGroups[gi]), x + colW / 2, tableTop + headerH / 2 + 1.5, { align: 'center' });
         }
 
         let rowY = tableTop + headerH;
-        for (const slotKey of chunkSlots) {
-          const [day, perStr] = slotKey.split('|');
-          const period = Number(perStr);
-          const di = days.indexOf(day);
-          const label = `${dayLabels[di]} ${period}`;
-          const isAlt = (slots.indexOf(slotKey)) % 2 === 1;
+        let prevDay = '';
+        let daySpanStartY = rowY;
+        let daySpanRows = 0;
+
+        for (let idx = 0; idx < chunkRows.length; idx++) {
+          const { day, period } = chunkRows[idx];
+          const isNewDay = day !== prevDay;
+
+          if (isNewDay && prevDay) {
+            const spanH = daySpanRows * rowH;
+            doc.setFillColor(50, 58, 69);
+            doc.setTextColor(255, 255, 255);
+            doc.setFont('DejaVuSans', 'bold');
+            doc.setFontSize(5);
+            doc.rect(M, daySpanStartY, dayColW, spanH, 'FD');
+            doc.text(dayLabels[days.indexOf(prevDay)], M + dayColW / 2, daySpanStartY + spanH / 2 + 1.2, { align: 'center' });
+            daySpanStartY = rowY;
+            daySpanRows = 0;
+          }
+
+          prevDay = day;
+          daySpanRows++;
+          const isAlt = idx % 2 === 1;
 
           if (isAlt) {
             doc.setFillColor(244, 246, 249);
-            doc.rect(M, rowY, rowLabelW + chunkGroups.length * colW, rowH, 'F');
+            doc.rect(M, rowY, labelW + chunkGroups.length * colW, rowH, 'F');
           }
 
           doc.setDrawColor(210, 214, 220);
-          doc.setFillColor(50, 58, 69);
-          doc.setTextColor(255, 255, 255);
-          doc.setFont('DejaVuSans', 'bold');
+          doc.rect(M, rowY, dayColW, rowH, 'S');
+          doc.rect(M + dayColW, rowY, perColW, rowH, 'S');
+
+          doc.setTextColor(100, 100, 100);
+          doc.setFont('DejaVuSans', 'normal');
           doc.setFontSize(5);
-          doc.rect(M, rowY, rowLabelW, rowH, 'FD');
-          doc.text(label, M + rowLabelW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
+          doc.text(String(period), M + dayColW + perColW / 2, rowY + rowH / 2 + 1.2, { align: 'center' });
 
           for (let gi = 0; gi < chunkGroups.length; gi++) {
-            const cx = M + rowLabelW + gi * colW;
+            const cx = M + labelW + gi * colW;
             const text = getCell(chunkGroups[gi], day, period);
 
             doc.setDrawColor(210, 214, 220);
@@ -486,6 +516,16 @@ export const ScheduleViewer = () => {
           }
 
           rowY += rowH;
+        }
+
+        if (prevDay) {
+          const spanH = daySpanRows * rowH;
+          doc.setFillColor(50, 58, 69);
+          doc.setTextColor(255, 255, 255);
+          doc.setFont('DejaVuSans', 'bold');
+          doc.setFontSize(5);
+          doc.rect(M, daySpanStartY, dayColW, spanH, 'FD');
+          doc.text(dayLabels[days.indexOf(prevDay)], M + dayColW / 2, daySpanStartY + spanH / 2 + 1.2, { align: 'center' });
         }
       }
     }
