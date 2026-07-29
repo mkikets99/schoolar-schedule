@@ -5,7 +5,10 @@ self.onmessage = (event) => {
 
   switch (type) {
     case 'INIT':
-      self.postMessage({ type: 'READY' });
+      self.postMessage({
+        type: 'READY',
+        payload: { version: __APP_VERSION__, buildDate: __BUILD_DATE__ },
+      });
       break;
 
     case 'GENERATE_SCHEDULE':

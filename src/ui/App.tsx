@@ -18,6 +18,8 @@ function AppContent() {
   const { t, i18n } = useTranslation();
   const { project, isLoading, updateGeneratedSchedule, clearGeneratedSchedule } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
+  const [workerVersion, setWorkerVersion] = useState<string>('');
+  const [workerBuildDate, setWorkerBuildDate] = useState<string>('');
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
@@ -29,6 +31,8 @@ function AppContent() {
       const { type, payload } = event.data;
       if (type === 'READY') {
         setWorkerStatus(t('worker_ready'));
+        setWorkerVersion(payload?.version ?? '');
+        setWorkerBuildDate(payload?.buildDate ?? '');
       } else if (type === 'PROGRESS') {
         setWorkerStatus(`${t('generating')} ${payload.progress}%`);
       } else if (type === 'RESULT') {
@@ -110,6 +114,11 @@ function AppContent() {
           </select>
           <div className="status-bar">
             <span>{workerStatus}</span>
+            {workerVersion && (
+              <span className="worker-version" title={t('build_date', { date: workerBuildDate })}>
+                v{workerVersion}
+              </span>
+            )}
           </div>
         </div>
       </header>
