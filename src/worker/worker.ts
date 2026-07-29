@@ -44,10 +44,12 @@ async function generateSchedule(project: ProjectState) {
 
   const groupConfig = new Map<string, GroupScheduleConfig>();
   for (const group of project.groups || []) {
+    const maxDaily = group.maxDailyLessons ?? 8;
+    const availableSlots = (group.periodEnd ?? 8) - (group.periodStart ?? 1) + 1;
     groupConfig.set(group.id, {
       periodStart: group.periodStart ?? 1,
       periodEnd: group.periodEnd ?? 8,
-      maxDaily: group.maxDailyLessons ?? 8,
+      maxDaily: Math.min(maxDaily, availableSlots),
     });
   }
 
@@ -131,15 +133,6 @@ async function generateSchedule(project: ProjectState) {
     dailyCounts.set(gid, days.map(() => 0));
   }
 
-  function shuffle<T>(arr: T[]): T[] {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
   units.sort((a, b) => {
     const ta = batchCounts.get(a.groupId) || 0;
     const tb = batchCounts.get(b.groupId) || 0;
@@ -147,7 +140,7 @@ async function generateSchedule(project: ProjectState) {
     const aa = a.lessons[0]?.teacherId || '';
     const ab = b.lessons[0]?.teacherId || '';
     if (aa !== ab) return aa.localeCompare(ab);
-    return Math.random() - 0.5;
+    return a.lessons[0]?.id.localeCompare(b.lessons[0]?.id || '') || 0;
   });
 
   const schedule: any[] = [];
@@ -248,30 +241,32 @@ async function generateSchedule(project: ProjectState) {
     return periods;
   }
 
-  function orderPeriodsByAdjacency(groupId: string, day: string, allPeriods: number[]): number[] {
+  function orderPeriodsForSchool(groupId: string, day: string, allPeriods: number[]): number[] {
     const existing = getGroupExistingPeriods(groupId, day);
-    if (existing.length === 0) return allPeriods;
+    if (existing.length === 0) return [...allPeriods];
 
-    const cfg = groupConfig.get(groupId);
-    const pStart = cfg?.periodStart ?? 1;
-    const pEnd = cfg?.periodEnd ?? 8;
-    const ordered = new Set<number>();
+    const occupied = new Set(existing);
+    const sorted = [...existing].sort((a, b) => a - b);
+    const ordered: number[] = [];
 
-    for (const p of existing) {
-      if (p + 1 <= pEnd) ordered.add(p + 1);
-    }
-    for (let i = existing.length - 1; i >= 0; i--) {
-      if (existing[i] - 1 >= pStart) ordered.add(existing[i] - 1);
-    }
-    for (let i = 0; i < existing.length - 1; i++) {
-      for (let p = existing[i] + 1; p < existing[i + 1]; p++) {
-        ordered.add(p);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      for (let p = sorted[i] + 1; p < sorted[i + 1]; p++) {
+        if (!occupied.has(p)) ordered.push(p);
       }
     }
-    for (const p of shuffle(allPeriods)) {
-      ordered.add(p);
+
+    const cfg = groupConfig.get(groupId);
+    const pEnd = cfg?.periodEnd ?? 8;
+    for (let p = sorted[sorted.length - 1] + 1; p <= pEnd; p++) {
+      if (!occupied.has(p)) ordered.push(p);
     }
-    return [...ordered];
+
+    const pStart = cfg?.periodStart ?? 1;
+    for (let p = pStart; p < sorted[0]; p++) {
+      if (!occupied.has(p)) ordered.push(p);
+    }
+
+    return ordered;
   }
 
   for (const unit of units) {
@@ -291,7 +286,9 @@ async function generateSchedule(project: ProjectState) {
 
     for (const ds of dayScores) {
       if (placed) break;
-      const ordered = orderPeriodsByAdjacency(unit.groupId, ds.day, allPeriods);
+      if (ds.need === -999) continue;
+
+      const ordered = orderPeriodsForSchool(unit.groupId, ds.day, allPeriods);
 
       if (ds.need <= 0) {
         for (const p of ordered) {
@@ -319,7 +316,9 @@ async function generateSchedule(project: ProjectState) {
     if (!placed) {
       for (const day of days) {
         if (placed) break;
-        const ordered = orderPeriodsByAdjacency(unit.groupId, day, allPeriods);
+        const di = days.indexOf(day);
+        if (counts[di] >= maxDaily) continue;
+        const ordered = orderPeriodsForSchool(unit.groupId, day, allPeriods);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
