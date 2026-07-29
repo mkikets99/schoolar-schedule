@@ -12,7 +12,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 export async function ensureFonts(doc: jsPDF): Promise<void> {
   if (!fontDataPromise) {
-    fontDataPromise = fetch('/fonts/DejaVuSans.ttf')
+    fontDataPromise = fetch('https://cdn.jsdelivr.net/npm/dejavu-sans@1.0.0/fonts/dejavu-sans-webfont.ttf')
       .then(r => r.arrayBuffer())
       .then(arrayBufferToBase64);
   }
