@@ -4,6 +4,9 @@ import { useProject } from '../context/ProjectContext';
 import { ExportModal } from './ExportModal';
 import { ExportContext } from '../services/ExportService';
 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
 export const ScheduleViewer = () => {
   const { t } = useTranslation();
   const { project } = useProject();
@@ -26,8 +29,8 @@ export const ScheduleViewer = () => {
   const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
   const [exportOpen, setExportOpen] = useState(false);
 
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const allPeriods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  const days = DAYS;
+  const allPeriods = ALL_PERIODS;
 
   const conflictKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -70,6 +73,55 @@ export const ScheduleViewer = () => {
       return false;
     });
   }, [schedule, filterType, filterId]);
+
+  const groupGaps = useMemo(() => {
+    const result = new Map<string, Map<string, number[]>>();
+    for (const group of groups) {
+      const start = group.periodStart ?? 1;
+      const dayMap = new Map<string, number[]>();
+      for (const day of days) {
+        const periods = schedule
+          .filter(l => l.groupId === group.id && l.day === day)
+          .map(l => l.period);
+        if (periods.length === 0) continue;
+        const last = Math.max(...periods);
+        const occupied = new Set(periods);
+        const bad: number[] = [];
+        for (let p = start; p < last; p++) {
+          if (!occupied.has(p)) bad.push(p);
+        }
+        if (bad.length > 0) dayMap.set(day, bad);
+      }
+      if (dayMap.size > 0) result.set(group.id, dayMap);
+    }
+    return result;
+  }, [schedule, groups, days]);
+
+  const displayedGroupIds = useMemo(
+    () => new Set(displayedLessons.map(l => l.groupId)),
+    [displayedLessons]
+  );
+
+  const gapSlots = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const gid of displayedGroupIds) {
+      const dayMap = groupGaps.get(gid);
+      if (!dayMap) continue;
+      for (const [day, periods] of dayMap) {
+        for (const p of periods) {
+          const key = `${day}-${p}`;
+          map.set(key, (map.get(key) || 0) + 1);
+        }
+      }
+    }
+    return map;
+  }, [displayedGroupIds, groupGaps]);
+
+  const gapCount = useMemo(() => {
+    let total = 0;
+    for (const count of gapSlots.values()) total += count;
+    return total;
+  }, [gapSlots]);
 
   const getLessonsAt = (day: string, period: number) => {
     return displayedLessons.filter(l => l.day === day && l.period === period);
@@ -134,6 +186,7 @@ export const ScheduleViewer = () => {
           <div className="summary-badge">
             {schedule.length} {t('lessons_assigned').toLowerCase()}
             {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
+            {gapCount > 0 && <span className="gap-count"> • {gapCount} {t('unfilled_gaps').toLowerCase()}</span>}
           </div>
         )}
 
@@ -161,6 +214,10 @@ export const ScheduleViewer = () => {
           <span className="stat-label">{t('conflicts')}</span>
           <span className="stat-value">{conflictKeys.size}</span>
         </div>
+        <div className={`stat-block gaps ${gapCount > 0 ? 'gap-warn' : 'ok'}`}>
+          <span className="stat-label">{t('unfilled_gaps')}</span>
+          <span className="stat-value">{gapCount}</span>
+        </div>
         <div className={`stat-block score ${score >= 1 ? 'ok' : score >= 0.5 ? 'mid' : 'warn'}`}>
           <span className="stat-label">{t('score')}</span>
           <span className="stat-value">{(score * 100).toFixed(0)}%</span>
@@ -184,9 +241,15 @@ export const ScheduleViewer = () => {
                   <td className="period-col">{period}</td>
                   {days.map(day => {
                     const lessons = getLessonsAt(day, period);
+                    const gapGroups = gapSlots.get(`${day}-${period}`) || 0;
+                    const isGapSlot = lessons.length === 0 && gapGroups > 0;
                     return (
-                      <td key={day} className={`slot ${lessons.length > 1 ? 'multi-slot' : ''}`}>
-                        {lessons.length === 0 ? null : lessons.length === 1 ? (() => {
+                      <td key={day} className={`slot ${lessons.length > 1 ? 'multi-slot' : ''} ${isGapSlot ? 'gap-slot' : ''}`}>
+                        {lessons.length === 0 ? isGapSlot ? (
+                          <div className="gap-marker" title={t('unfilled_gaps_desc')}>
+                            {gapGroups > 1 ? `×${gapGroups}` : '×'}
+                          </div>
+                        ) : null : lessons.length === 1 ? (() => {
                           const lesson = lessons[0];
                           return (
                             <div

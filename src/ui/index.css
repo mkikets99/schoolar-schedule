@@ -1005,9 +1005,29 @@ tr.unassigned {
   color: #ff4d4d;
 }
 
+.gap-count {
+  color: #FFC107;
+}
+
 .full-schedule .slot {
   height: auto;
   min-height: 60px;
+}
+
+.slot.gap-slot {
+  background-color: #232323;
+  background-image: repeating-linear-gradient(45deg, #232323 0px, #232323 6px, #2c2c2c 6px, #2c2c2c 12px);
+}
+
+.gap-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 60px;
+  color: #555;
+  font-size: 1rem;
+  font-weight: bold;
 }
 
 .schedule-stats {
@@ -1045,6 +1065,7 @@ tr.unassigned {
 .stat-block.warn .stat-value { color: #ff4d4d; }
 .stat-block.ok .stat-value { color: #4CAF50; }
 .stat-block.mid .stat-value { color: #FFC107; }
+.stat-block.gap-warn .stat-value { color: #FFC107; }
 .stat-block.needed .stat-value { color: #888; }
 .stat-block.assigned .stat-value { color: #64B5F6; }
 

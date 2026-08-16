@@ -296,7 +296,7 @@ async function generateSchedule(project: ProjectState) {
         const counts = dailyCounts.get(unit.groupId);
         const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
         if ((counts?.[days.indexOf(day)] ?? 0) >= maxDaily) continue;
-        const ordered = orderPeriodsForSchool(unit.groupId, day, getPeriodsForGroup(unit.groupId));
+        const ordered = getPeriodsForGroup(unit.groupId);
         for (const p of ordered) {
           if (canPlace(lesson, day, p, false)) {
             placeLesson(lesson, day, p);
@@ -344,45 +344,6 @@ async function generateSchedule(project: ProjectState) {
     return result;
   }
 
-  function getGroupExistingPeriods(groupId: string, day: string): number[] {
-    const periods: number[] = [];
-    for (const lesson of schedule) {
-      if (lesson.groupId === groupId && lesson.day === day) {
-        periods.push(lesson.period);
-      }
-    }
-    periods.sort((a, b) => a - b);
-    return periods;
-  }
-
-  function orderPeriodsForSchool(groupId: string, day: string, allPeriods: number[]): number[] {
-    const existing = getGroupExistingPeriods(groupId, day);
-    if (existing.length === 0) return [...allPeriods];
-
-    const occupied = new Set(existing);
-    const sorted = [...existing].sort((a, b) => a - b);
-    const ordered: number[] = [];
-
-    for (let i = 0; i < sorted.length - 1; i++) {
-      for (let p = sorted[i] + 1; p < sorted[i + 1]; p++) {
-        if (!occupied.has(p)) ordered.push(p);
-      }
-    }
-
-    const cfg = groupConfig.get(groupId);
-    const pEnd = cfg?.periodEnd ?? 8;
-    for (let p = sorted[sorted.length - 1] + 1; p <= pEnd; p++) {
-      if (!occupied.has(p)) ordered.push(p);
-    }
-
-    const pStart = cfg?.periodStart ?? 1;
-    for (let p = pStart; p < sorted[0]; p++) {
-      if (!occupied.has(p)) ordered.push(p);
-    }
-
-    return ordered;
-  }
-
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
     const counts = dailyCounts.get(unit.groupId)!;
@@ -399,34 +360,14 @@ async function generateSchedule(project: ProjectState) {
     dayScores.sort((a, b) => b.need - a.need);
 
     let placed = false;
-    const allPeriods = getPeriodsForGroup(unit.groupId);
 
     for (const ds of dayScores) {
       if (placed) break;
       if (ds.need === -999) continue;
 
-      const ordered = orderPeriodsForSchool(unit.groupId, ds.day, allPeriods);
-
-      if (ds.need <= 0) {
-        for (const p of ordered) {
-          if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-        }
-      } else {
-        const tId = unit.lessons[0]?.teacherId;
-        for (const p of ordered) {
-          if (tId) {
-            const prev = teacherBusy.has(`${tId}-${ds.day}-${p - 1}`);
-            const next = teacherBusy.has(`${tId}-${ds.day}-${p + 1}`);
-            if (prev || next) {
-              if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-            }
-          }
-        }
-        if (!placed) {
-          for (const p of ordered) {
-            if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-          }
-        }
+      const ordered = getPeriodsForGroup(unit.groupId);
+      for (const p of ordered) {
+        if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
       }
     }
 
@@ -436,7 +377,7 @@ async function generateSchedule(project: ProjectState) {
         const di = days.indexOf(day);
         if (counts[di] >= maxDaily) continue;
         if (unit.type === 'double' && counts[di] + 2 > maxDaily) continue;
-        const ordered = orderPeriodsForSchool(unit.groupId, day, allPeriods);
+        const ordered = getPeriodsForGroup(unit.groupId);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }

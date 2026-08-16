@@ -158,15 +158,6 @@ async function generateTestSchedule(project: ProjectState) {
     dailyCounts.set(gid, days.map(() => 0));
   }
 
-  function shuffle<T>(arr: T[]): T[] {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
   units.sort((a, b) => {
     const da = a.type === 'double' ? 0 : 1;
     const db = b.type === 'double' ? 0 : 1;
@@ -279,7 +270,7 @@ async function generateTestSchedule(project: ProjectState) {
         const counts = dailyCounts.get(unit.groupId);
         const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
         if ((counts?.[days.indexOf(day)] ?? 0) >= maxDaily) continue;
-        const ordered = orderPeriodsByAdjacency(unit.groupId, day, getPeriodsForGroup(unit.groupId));
+        const ordered = getPeriodsForGroup(unit.groupId);
         for (const p of ordered) {
           if (canPlace(lesson, day, p, false)) {
             placeLesson(lesson, day, p);
@@ -327,43 +318,6 @@ async function generateTestSchedule(project: ProjectState) {
     return result;
   }
 
-  function getGroupExistingPeriods(groupId: string, day: string): number[] {
-    const periods: number[] = [];
-    for (const lesson of schedule) {
-      if (lesson.groupId === groupId && lesson.day === day) {
-        periods.push(lesson.period);
-      }
-    }
-    periods.sort((a, b) => a - b);
-    return periods;
-  }
-
-  function orderPeriodsByAdjacency(groupId: string, day: string, allPeriods: number[]): number[] {
-    const existing = getGroupExistingPeriods(groupId, day);
-    if (existing.length === 0) return allPeriods;
-
-    const cfg = groupConfig.get(groupId);
-    const pStart = cfg?.periodStart ?? 1;
-    const pEnd = cfg?.periodEnd ?? 8;
-    const ordered = new Set<number>();
-
-    for (const p of existing) {
-      if (p + 1 <= pEnd) ordered.add(p + 1);
-    }
-    for (let i = existing.length - 1; i >= 0; i--) {
-      if (existing[i] - 1 >= pStart) ordered.add(existing[i] - 1);
-    }
-    for (let i = 0; i < existing.length - 1; i++) {
-      for (let p = existing[i] + 1; p < existing[i + 1]; p++) {
-        ordered.add(p);
-      }
-    }
-    for (const p of shuffle(allPeriods)) {
-      ordered.add(p);
-    }
-    return [...ordered];
-  }
-
   let unitsAssigned = 0;
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
@@ -381,33 +335,13 @@ async function generateTestSchedule(project: ProjectState) {
     dayScores.sort((a, b) => b.need - a.need);
 
     let placed = false;
-    const allPeriods = getPeriodsForGroup(unit.groupId);
 
     for (const ds of dayScores) {
       if (placed) break;
       if (ds.need === -999) continue;
-      const ordered = orderPeriodsByAdjacency(unit.groupId, ds.day, allPeriods);
-
-      if (ds.need <= 0) {
-        for (const p of ordered) {
-          if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-        }
-      } else {
-        const tId = unit.lessons[0]?.teacherId;
-        for (const p of ordered) {
-          if (tId) {
-            const prev = teacherBusy.has(`${tId}-${ds.day}-${p - 1}`);
-            const next = teacherBusy.has(`${tId}-${ds.day}-${p + 1}`);
-            if (prev || next) {
-              if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-            }
-          }
-        }
-        if (!placed) {
-          for (const p of ordered) {
-            if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
-          }
-        }
+      const ordered = getPeriodsForGroup(unit.groupId);
+      for (const p of ordered) {
+        if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
       }
     }
 
@@ -417,7 +351,7 @@ async function generateTestSchedule(project: ProjectState) {
         const di = days.indexOf(day);
         if (counts[di] >= maxDaily) continue;
         if (unit.type === 'double' && counts[di] + 2 > maxDaily) continue;
-        const ordered = orderPeriodsByAdjacency(unit.groupId, day, allPeriods);
+        const ordered = getPeriodsForGroup(unit.groupId);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
@@ -791,7 +725,7 @@ describe('Worker scheduling algorithm', () => {
     }
   });
 
-  it('places lessons for a group in consecutive periods (no gaps)', async () => {
+  it('packs lessons contiguously from the first period (no empty first lesson)', async () => {
     const project = makeProject({
       curriculum: [
         { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 20, teacherId: 't1', roomId: 'r1' },
@@ -806,11 +740,36 @@ describe('Worker scheduling algorithm', () => {
         .filter((l: any) => l.groupId === 'g1' && l.day === day)
         .sort((a: any, b: any) => a.period - b.period);
 
-      if (dayLessons.length > 1) {
-        for (let i = 1; i < dayLessons.length; i++) {
-          expect(dayLessons[i].period - dayLessons[i - 1].period).toBeLessThanOrEqual(2);
-        }
+      if (dayLessons.length > 0) {
+        expect(dayLessons[0].period).toBe(1);
       }
+      for (let i = 1; i < dayLessons.length; i++) {
+        expect(dayLessons[i].period - dayLessons[i - 1].period).toBe(1);
+      }
+    }
+  });
+
+  it('creates an empty first period only when forced by a constraint', async () => {
+    const project = makeProject({
+      teachers: [{ id: 't1', name: 'Teacher A', subjects: ['subj-math'] }],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1', roomId: 'r1' },
+      ],
+      constraints: [
+        { id: 'con1', kind: 'TEACHER_BUSY', teacherId: 't1', day: '*', periods: [1] },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    expect(result.schedule).toHaveLength(5);
+    expect(result.conflicts).toHaveLength(0);
+    for (const day of ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']) {
+      const dayLessons = result.schedule
+        .filter((l: any) => l.groupId === 'g1' && l.day === day)
+        .sort((a: any, b: any) => a.period - b.period);
+      expect(dayLessons).toHaveLength(1);
+      expect(dayLessons[0].period).toBe(2);
     }
   });
 
