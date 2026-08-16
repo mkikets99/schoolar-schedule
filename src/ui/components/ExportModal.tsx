@@ -21,11 +21,13 @@ export const ExportModal = ({ isOpen, onClose, context }: ExportModalProps) => {
   const [reportType, setReportType] = useState<ExportReportType>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set(context.groupIds));
   const [format, setFormat] = useState<ExportFormat>('xlsx');
+  const [showSubjects, setShowSubjects] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setSelected(new Set(context.groupIds));
+      setShowSubjects(true);
       setBusy(false);
     }
   }, [isOpen, context.groupIds]);
@@ -48,7 +50,7 @@ export const ExportModal = ({ isOpen, onClose, context }: ExportModalProps) => {
     if (selected.size === 0) return;
     setBusy(true);
     try {
-      await exportReport(reportType, format, { ...context, groupIds: [...selected] }, t);
+      await exportReport(reportType, format, { ...context, groupIds: [...selected] }, t, { showSubjects });
     } finally {
       setBusy(false);
     }
@@ -123,6 +125,15 @@ export const ExportModal = ({ isOpen, onClose, context }: ExportModalProps) => {
           </label>
         </div>
       </div>
+
+      {reportType === 'teacher_load' && (
+        <div className="form-field">
+          <label className="export-checkbox-item">
+            <input type="checkbox" checked={showSubjects} onChange={e => setShowSubjects(e.target.checked)} />
+            {t('show_subjects')}
+          </label>
+        </div>
+      )}
     </Modal>
   );
 };

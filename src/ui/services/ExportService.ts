@@ -7,6 +7,10 @@ import { ensureFonts } from '../../utils/pdfFonts';
 export type ExportFormat = 'pdf' | 'xlsx';
 export type ExportReportType = 'all' | 'with_teachers' | 'only_lessons' | 'teacher_load';
 
+export interface ExportOptions {
+  showSubjects?: boolean;
+}
+
 export interface ExportContext {
   schedule: Lesson[];
   groupIds: string[];
@@ -48,6 +52,11 @@ interface MatrixColumn {
   label: string;
 }
 
+interface MatrixHeaderGroup {
+  label: string;
+  colSpan: number;
+}
+
 interface MatrixStat {
   label: string;
   value: string | number;
@@ -65,6 +74,9 @@ interface Matrix {
   palette: [number, number, number][];
   groupHeader: string;
   rowHeader: string;
+  headerGroups?: MatrixHeaderGroup[];
+  showGroupLabelCol?: boolean;
+  columnWidths?: number[];
   fileNameBase: string;
 }
 
@@ -224,8 +236,9 @@ function buildGroupMatrix(ctx: ExportContext, t: TFunction, onlyLessons: boolean
   };
 }
 
-function buildTeacherLoadMatrix(ctx: ExportContext, t: TFunction): Matrix {
+function buildTeacherLoadMatrix(ctx: ExportContext, t: TFunction, options?: ExportOptions): Matrix {
   const src = lessonsInGroups(ctx);
+  const showSubjects = options?.showSubjects !== false;
   const teacherIds = [...new Set(src.filter(l => l.teacherId).map(l => l.teacherId!))].sort((a, b) =>
     teacherName(ctx, a).localeCompare(teacherName(ctx, b))
   );
@@ -237,7 +250,7 @@ function buildTeacherLoadMatrix(ctx: ExportContext, t: TFunction): Matrix {
   for (const day of usedDays) {
     for (const period of dayPeriods.get(day)!) {
       colData.push({ day, period });
-      columns.push({ id: `${day}-${period}`, label: `${t(day.toLowerCase())} ${period}` });
+      columns.push({ id: `${day}-${period}`, label: String(period) });
     }
   }
 
@@ -254,12 +267,41 @@ function buildTeacherLoadMatrix(ctx: ExportContext, t: TFunction): Matrix {
     return {
       entries: lessons.map(l => ({
         text: groupName(ctx, l.groupId),
-        detail: subjectName(ctx, l.subjectId),
+        detail: showSubjects ? subjectName(ctx, l.subjectId) : undefined,
         colorIndex: subjIndex(ctx, l.subjectId),
         conflict: ctx.conflictKeys.has(l.id),
       })),
     };
   };
+
+  const columnWidths = columns.map((_, ci) => {
+    let maxW = Math.max(1, columns[ci].label.length);
+    for (const row of rows) {
+      const cell = getCell(row, ci);
+      if (!cell) continue;
+      if (cell.entries) {
+        for (const e of cell.entries) {
+          maxW = Math.max(maxW, e.text.length, e.detail ? e.detail.length : 0);
+        }
+      } else if (cell.text) {
+        maxW = Math.max(maxW, cell.text.length);
+      }
+    }
+    return maxW;
+  });
+
+  const headerGroups: MatrixHeaderGroup[] = [];
+  let col = 0;
+  for (const day of usedDays) {
+    const span = dayPeriods.get(day)!.length;
+    const label = t(day.toLowerCase());
+    headerGroups.push({ label, colSpan: span });
+    const total = columnWidths.slice(col, col + span).reduce((s, w) => s + w, 0);
+    if (total < label.length + 2) {
+      columnWidths[col + span - 1] += label.length + 2 - total;
+    }
+    col += span;
+  }
 
   return {
     title: ctx.schoolName,
@@ -272,11 +314,14 @@ function buildTeacherLoadMatrix(ctx: ExportContext, t: TFunction): Matrix {
     palette: SUBJ_PALETTE,
     groupHeader: '',
     rowHeader: t('teacher'),
+    headerGroups,
+    showGroupLabelCol: false,
+    columnWidths,
     fileNameBase: `${ctx.schoolName.replace(/\s+/g, '_')}_teacher_load`,
   };
 }
 
-function buildMatrix(type: ExportReportType, ctx: ExportContext, t: TFunction): Matrix {
+function buildMatrix(type: ExportReportType, ctx: ExportContext, t: TFunction, options?: ExportOptions): Matrix {
   switch (type) {
     case 'all':
       return buildFullScheduleMatrix(ctx, t);
@@ -285,7 +330,7 @@ function buildMatrix(type: ExportReportType, ctx: ExportContext, t: TFunction): 
     case 'only_lessons':
       return buildGroupMatrix(ctx, t, true);
     case 'teacher_load':
-      return buildTeacherLoadMatrix(ctx, t);
+      return buildTeacherLoadMatrix(ctx, t, options);
   }
 }
 
@@ -300,20 +345,32 @@ async function renderMatrixToPdf(matrix: Matrix, t: TFunction): Promise<void> {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const groupLabelW = 16;
+  const showGroup = matrix.showGroupLabelCol !== false;
   const maxLabelLen = matrix.rows.reduce((s, r) => Math.max(s, r.label.length), 1);
   const rowLabelW = Math.min(40, Math.max(8, maxLabelLen * 1.9 + 4));
-  const headerH = 9;
+  const labelW = (showGroup ? groupLabelW : 0) + rowLabelW;
+  const isGrouped = !!matrix.headerGroups && matrix.headerGroups.length > 0;
+  const headerH = isGrouped ? 16 : 9;
   const titleBlockH = 30;
   const legendH = 12;
 
   const nCols = matrix.columns.length;
-  const availableW = pageW - M * 2 - groupLabelW - rowLabelW;
-  const colW = Math.min(32, Math.max(8, availableW / Math.max(1, nCols)));
+  const availableW = pageW - M * 2 - labelW;
+  const colW = matrix.columnWidths && matrix.columnWidths.length === nCols
+    ? Math.min(32, Math.max(8, (matrix.columnWidths.reduce((s, w) => s + w, 0) / Math.max(1, nCols)) * 1.6))
+    : Math.min(32, Math.max(8, availableW / Math.max(1, nCols)));
   const colsPerPage = Math.max(1, Math.floor(availableW / colW));
 
   const colChunks: number[][] = [];
   for (let i = 0; i < nCols; i += colsPerPage) {
     colChunks.push(Array.from({ length: Math.min(colsPerPage, nCols - i) }, (_, k) => i + k));
+  }
+
+  const colGroups: number[] = [];
+  if (isGrouped) {
+    matrix.headerGroups!.forEach((g, gi) => {
+      for (let k = 0; k < g.colSpan; k++) colGroups.push(gi);
+    });
   }
 
   const rowHeights = matrix.rows.map(row => {
@@ -357,21 +414,46 @@ async function renderMatrixToPdf(matrix: Matrix, t: TFunction): Promise<void> {
 
   const drawPage = (colChunk: number[], rows: MatrixRow[], heights: number[], topY: number) => {
     const headerY = topY;
+    const rowLabelX = M + (showGroup ? groupLabelW : 0);
+    const dataStartX = rowLabelX + rowLabelW;
+
     doc.setDrawColor(...BORDER);
     doc.setFillColor(...HEADER_BG);
     doc.setTextColor(255, 255, 255);
     doc.setFont('DejaVuSans', 'bold');
     doc.setFontSize(7);
 
-    doc.rect(M, headerY, groupLabelW, headerH, 'FD');
-    doc.text(matrix.groupHeader, M + groupLabelW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
-    doc.rect(M + groupLabelW, headerY, rowLabelW, headerH, 'FD');
-    doc.text(matrix.rowHeader, M + groupLabelW + rowLabelW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
+    doc.rect(M, headerY, labelW, headerH, 'FD');
+    if (showGroup) {
+      doc.text(matrix.groupHeader, M + groupLabelW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
+    }
+    doc.text(matrix.rowHeader, rowLabelX + rowLabelW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
 
-    for (let i = 0; i < colChunk.length; i++) {
-      const x = M + groupLabelW + rowLabelW + i * colW;
-      doc.rect(x, headerY, colW, headerH, 'FD');
-      doc.text(matrix.columns[colChunk[i]].label, x + colW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
+    if (isGrouped) {
+      const h1 = 9;
+      const h2 = headerH - h1;
+      let i = 0;
+      while (i < colChunk.length) {
+        const gi = colGroups[colChunk[i]];
+        let j = i;
+        while (j < colChunk.length && colGroups[colChunk[j]] === gi) j++;
+        const x0 = dataStartX + i * colW;
+        const x1 = dataStartX + j * colW;
+        doc.rect(x0, headerY, x1 - x0, h1, 'FD');
+        doc.text(matrix.headerGroups![gi].label, (x0 + x1) / 2, headerY + h1 / 2 + 1.5, { align: 'center' });
+        i = j;
+      }
+      for (let ci = 0; ci < colChunk.length; ci++) {
+        const x = dataStartX + ci * colW;
+        doc.rect(x, headerY + h1, colW, h2, 'FD');
+        doc.text(matrix.columns[colChunk[ci]].label, x + colW / 2, headerY + h1 + h2 / 2 + 1.5, { align: 'center' });
+      }
+    } else {
+      for (let i = 0; i < colChunk.length; i++) {
+        const x = dataStartX + i * colW;
+        doc.rect(x, headerY, colW, headerH, 'FD');
+        doc.text(matrix.columns[colChunk[i]].label, x + colW / 2, headerY + headerH / 2 + 1.5, { align: 'center' });
+      }
     }
 
     let rowY = headerY + headerH;
@@ -384,7 +466,7 @@ async function renderMatrixToPdf(matrix: Matrix, t: TFunction): Promise<void> {
       const rh = heights[ri];
       const isNewGroup = row.groupLabel !== prevGroup;
 
-      if (isNewGroup && prevGroup) {
+      if (isNewGroup && prevGroup && showGroup) {
         doc.setFillColor(...HEADER_BG);
         doc.setTextColor(255, 255, 255);
         doc.setFont('DejaVuSans', 'bold');
@@ -402,17 +484,17 @@ async function renderMatrixToPdf(matrix: Matrix, t: TFunction): Promise<void> {
       doc.setTextColor(255, 255, 255);
       doc.setFont('DejaVuSans', 'bold');
       doc.setFontSize(8);
-      doc.rect(M + groupLabelW, rowY, rowLabelW, rh, 'FD');
-      doc.text(row.label, M + groupLabelW + rowLabelW / 2, rowY + rh / 2 + 1.5, { align: 'center' });
+      doc.rect(rowLabelX, rowY, rowLabelW, rh, 'FD');
+      doc.text(row.label, rowLabelX + rowLabelW / 2, rowY + rh / 2 + 1.5, { align: 'center' });
 
       const isAlt = ri % 2 === 1;
       if (isAlt) {
         doc.setFillColor(...ALT_ROW);
-        doc.rect(M + groupLabelW + rowLabelW, rowY, colW * colChunk.length, rh, 'F');
+        doc.rect(dataStartX, rowY, colW * colChunk.length, rh, 'F');
       }
 
       for (let ci = 0; ci < colChunk.length; ci++) {
-        const cx = M + groupLabelW + rowLabelW + ci * colW;
+        const cx = dataStartX + ci * colW;
         const cell = matrix.getCell(row, colChunk[ci]);
         doc.setDrawColor(...BORDER);
         doc.rect(cx, rowY, colW, rh, 'S');
@@ -474,7 +556,7 @@ async function renderMatrixToPdf(matrix: Matrix, t: TFunction): Promise<void> {
       rowY += rh;
     }
 
-    if (prevGroup) {
+    if (prevGroup && showGroup) {
       doc.setFillColor(...HEADER_BG);
       doc.setTextColor(255, 255, 255);
       doc.setFont('DejaVuSans', 'bold');
@@ -567,10 +649,21 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(matrix.title.slice(0, 31) || 'Export');
 
-  const totalCols = 2 + matrix.columns.length;
-  sheet.getColumn(1).width = 16;
-  sheet.getColumn(2).width = 10;
-  for (let ci = 3; ci <= totalCols; ci++) sheet.getColumn(ci).width = 24;
+  const showGroup = matrix.showGroupLabelCol !== false;
+  const isGrouped = !!matrix.headerGroups && matrix.headerGroups.length > 0;
+  const rowLabelCol = showGroup ? 2 : 1;
+  const dataStartCol = rowLabelCol + 1;
+  const totalCols = rowLabelCol + matrix.columns.length;
+  const maxLabelLen = matrix.rows.reduce((s, r) => Math.max(s, r.label.length), 1);
+
+  if (showGroup) sheet.getColumn(1).width = 16;
+  sheet.getColumn(rowLabelCol).width = Math.min(30, Math.max(12, maxLabelLen + 2));
+  for (let ci = 0; ci < matrix.columns.length; ci++) {
+    const w = matrix.columnWidths && matrix.columnWidths[ci]
+      ? Math.min(30, Math.max(6, matrix.columnWidths[ci] + 2))
+      : 24;
+    sheet.getColumn(dataStartCol + ci).width = w;
+  }
 
   const b = () => ({ style: 'thin' as const, color: { argb: argb(BORDER) } });
   const border = { top: b(), bottom: b(), left: b(), right: b() };
@@ -596,25 +689,47 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
     c.border = border;
   }
 
-  const hr = sheet.getRow(5); hr.height = 22;
   const hdrFont = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
-  hr.getCell(1).value = matrix.groupHeader;
-  hr.getCell(1).font = hdrFont; hr.getCell(1).fill = solid(HEADER_BG);
-  hr.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-  hr.getCell(1).border = border;
-  hr.getCell(2).value = matrix.rowHeader;
-  hr.getCell(2).font = hdrFont; hr.getCell(2).fill = solid(HEADER_BG);
-  hr.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
-  hr.getCell(2).border = border;
-  for (let ci = 0; ci < matrix.columns.length; ci++) {
-    const c = hr.getCell(ci + 3);
-    c.value = matrix.columns[ci].label;
-    c.font = hdrFont; c.fill = solid(HEADER_BG);
-    c.alignment = { horizontal: 'center', vertical: 'middle' };
-    c.border = border;
+  const setHdr = (cell: ExcelJS.Cell, value: string) => {
+    cell.value = value;
+    cell.font = hdrFont;
+    cell.fill = solid(HEADER_BG);
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = border;
+  };
+
+  if (isGrouped) {
+    const lc = sheet.getRow(5).getCell(rowLabelCol);
+    lc.value = matrix.rowHeader;
+    lc.font = hdrFont;
+    lc.fill = solid(HEADER_BG);
+    lc.alignment = { horizontal: 'center', vertical: 'middle' };
+    lc.border = border;
+    sheet.mergeCells(5, rowLabelCol, 6, rowLabelCol);
+
+    let col = 0;
+    for (const g of matrix.headerGroups!) {
+      if (g.colSpan > 1) {
+        sheet.mergeCells(5, dataStartCol + col, 5, dataStartCol + col + g.colSpan - 1);
+      }
+      setHdr(sheet.getRow(5).getCell(dataStartCol + col), g.label);
+      col += g.colSpan;
+    }
+
+    const r6 = sheet.getRow(6); r6.height = 18;
+    for (let ci = 0; ci < matrix.columns.length; ci++) {
+      setHdr(r6.getCell(dataStartCol + ci), matrix.columns[ci].label);
+    }
+  } else {
+    const hr = sheet.getRow(5); hr.height = 22;
+    if (showGroup) setHdr(hr.getCell(1), matrix.groupHeader);
+    setHdr(hr.getCell(rowLabelCol), matrix.rowHeader);
+    for (let ci = 0; ci < matrix.columns.length; ci++) {
+      setHdr(hr.getCell(dataStartCol + ci), matrix.columns[ci].label);
+    }
   }
 
-  let dataRowNum = 6;
+  let dataRowNum = isGrouped ? 7 : 6;
   const dataStart = dataRowNum;
   let prevGroup = '';
   let groupStartRow = dataRowNum;
@@ -623,7 +738,7 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
     const row = matrix.rows[ri];
     const isNewGroup = row.groupLabel !== prevGroup;
 
-    if (isNewGroup && prevGroup && dataRowNum - groupStartRow > 1) {
+    if (isNewGroup && prevGroup && showGroup && dataRowNum - groupStartRow > 1) {
       sheet.mergeCells(groupStartRow, 1, dataRowNum - 1, 1);
     }
     if (isNewGroup) groupStartRow = dataRowNum;
@@ -633,18 +748,20 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
     xrow.height = 28;
     const isAlt = (dataRowNum - dataStart) % 2 === 1;
 
-    const lc = xrow.getCell(1);
-    lc.border = border;
-    if (row.groupLabel) {
-      lc.value = row.groupLabel;
-      lc.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
-      lc.fill = solid(HEADER_BG);
-      lc.alignment = { horizontal: 'center', vertical: 'middle' };
-    } else if (isAlt) {
-      lc.fill = solid(ALT_ROW);
+    if (showGroup) {
+      const lc = xrow.getCell(1);
+      lc.border = border;
+      if (row.groupLabel) {
+        lc.value = row.groupLabel;
+        lc.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+        lc.fill = solid(HEADER_BG);
+        lc.alignment = { horizontal: 'center', vertical: 'middle' };
+      } else if (isAlt) {
+        lc.fill = solid(ALT_ROW);
+      }
     }
 
-    const rc = xrow.getCell(2);
+    const rc = xrow.getCell(rowLabelCol);
     rc.value = row.label;
     rc.font = { bold: true, size: 9, color: { argb: 'FF505050' } };
     rc.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -652,7 +769,7 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
     if (isAlt) rc.fill = solid(ALT_ROW);
 
     for (let ci = 0; ci < matrix.columns.length; ci++) {
-      const c = xrow.getCell(ci + 3);
+      const c = xrow.getCell(dataStartCol + ci);
       c.border = border;
       const cell = matrix.getCell(row, ci);
       if (!cell) {
@@ -691,7 +808,7 @@ async function renderMatrixToXlsx(matrix: Matrix, t: TFunction): Promise<void> {
     dataRowNum++;
   }
 
-  if (prevGroup && dataRowNum - groupStartRow > 1) {
+  if (prevGroup && showGroup && dataRowNum - groupStartRow > 1) {
     sheet.mergeCells(groupStartRow, 1, dataRowNum - 1, 1);
   }
 
@@ -726,9 +843,10 @@ export async function exportReport(
   type: ExportReportType,
   format: ExportFormat,
   ctx: ExportContext,
-  t: TFunction
+  t: TFunction,
+  options?: ExportOptions
 ): Promise<void> {
-  const matrix = buildMatrix(type, ctx, t);
+  const matrix = buildMatrix(type, ctx, t, options);
   if (format === 'pdf') {
     await renderMatrixToPdf(matrix, t);
   } else {

@@ -216,5 +216,6 @@
   "export_btn": "Export",
   "exporting": "Exporting...",
   "select_at_least_one": "Select at least one class to export.",
+  "show_subjects": "Show subjects under class names",
   "export_no_data": "No lessons found for the selected classes."
 }
