@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useProject } from '../context/ProjectContext';
 import { LoadDistribution } from '../../shared/types';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 export const LoadDistributionUI = () => {
   const { t } = useTranslation();
@@ -12,6 +13,35 @@ export const LoadDistributionUI = () => {
   const load = project?.loadDistribution || [];
 
   const [isDraft, setIsDraft] = useState(true);
+  const [groupFilter, setGroupFilter] = useState('');
+  const [teacherFilter, setTeacherFilter] = useState('');
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
+
+  const getSubjectName = (id: string) => project?.subjects.find(s => s.id === id)?.name || 'Unknown';
+  const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || 'Unknown';
+  const getTeacherName = (id?: string) => (id ? teachers.find(t => t.id === id)?.name || '' : '');
+
+  const { query, setQuery, sort, toggleSort, rows: displayedRules, total, shown } = useTableControls<typeof curriculum[0]>({
+    rows: curriculum,
+    getSearchText: (rule) =>
+      `${getGroupName(rule.groupId)} ${getSubjectName(rule.subjectId)} ${getTeacherName(rule.teacherId)}`,
+    getSortValue: (rule, key) => {
+      switch (key) {
+        case 'group': return getGroupName(rule.groupId);
+        case 'subject': return getSubjectName(rule.subjectId);
+        case 'hours': return rule.hoursPerWeek;
+        case 'teacher': return getTeacherName(rule.teacherId);
+        default: return getGroupName(rule.groupId);
+      }
+    },
+    extraFilter: (rule) => {
+      if (groupFilter && rule.groupId !== groupFilter) return false;
+      if (teacherFilter && rule.teacherId !== teacherFilter) return false;
+      if (unassignedOnly && rule.teacherId) return false;
+      return true;
+    },
+    defaultSort: { key: 'group', direction: 'asc' },
+  });
 
   const handleAssignTeacher = (ruleId: string, teacherId: string | undefined) => {
     const updatedCurriculum = curriculum.map(rule => 
@@ -32,9 +62,6 @@ export const LoadDistributionUI = () => {
       }
     }
   };
-
-  const getSubjectName = (id: string) => project?.subjects.find(s => s.id === id)?.name || 'Unknown';
-  const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || 'Unknown';
 
   const teacherHours = teachers.reduce((acc, tchr) => {
     acc[tchr.id] = curriculum
@@ -74,24 +101,47 @@ export const LoadDistributionUI = () => {
           <div className="stat-value" style={{ fontSize: '1.5rem', color: unassignedCount > 0 ? '#ff4d4d' : '#4CAF50' }}>{unassignedCount}</div>
         </div>
         {teachers.map(tchr => (
-          <div key={tchr.id} className="teacher-card" style={{ opacity: isDraft ? 1 : 0.7 }}>
+          <div
+            key={tchr.id}
+            className={`teacher-card clickable ${teacherFilter === tchr.id ? 'active' : ''}`}
+            style={{ opacity: isDraft ? 1 : 0.7 }}
+            onClick={() => setTeacherFilter(prev => prev === tchr.id ? '' : tchr.id)}
+            title={teacherFilter === tchr.id ? t('clear_teacher_filter') : t('filter_by_teacher')}
+          >
             <strong>{tchr.name}</strong>
             <span>{teacherHours[tchr.id] || 0} hrs</span>
           </div>
         ))}
       </div>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <select className="table-filter" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+          <option value="">{t('all_groups')}</option>
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+        <select className="table-filter" value={teacherFilter} onChange={(e) => setTeacherFilter(e.target.value)}>
+          <option value="">{t('all_teachers')}</option>
+          {teachers.map(tchr => <option key={tchr.id} value={tchr.id}>{tchr.name}</option>)}
+        </select>
+        <label className="table-toggle">
+          <input type="checkbox" checked={unassignedOnly} onChange={(e) => setUnassignedOnly(e.target.checked)} />
+          {t('unassigned_only')}
+        </label>
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
       <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('group')}</th>
-            <th>{t('subject')}</th>
-            <th>{t('hours')}</th>
-            <th>{t('assigned_teacher')}</th>
+            <SortableTh label={t('group')} sortKey="group" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('subject')} sortKey="subject" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('hours')} sortKey="hours" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('assigned_teacher')} sortKey="teacher" sort={sort} onSort={toggleSort} />
           </tr>
         </thead>
         <tbody>
-          {curriculum.map(rule => (
+          {displayedRules.map(rule => (
             <tr key={rule.id} className={!rule.teacherId ? 'unassigned' : ''}>
               <td>{getGroupName(rule.groupId)}</td>
               <td>{getSubjectName(rule.subjectId)}</td>
@@ -110,9 +160,9 @@ export const LoadDistributionUI = () => {
               </td>
             </tr>
           ))}
-          {curriculum.length === 0 && (
+          {displayedRules.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">{t('no_rules')}</td>
+              <td colSpan={4} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
             </tr>
           )}
         </tbody>

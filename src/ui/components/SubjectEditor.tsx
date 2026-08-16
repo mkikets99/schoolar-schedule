@@ -4,6 +4,7 @@ import { Subject } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 export const SubjectEditor = () => {
   const { t } = useTranslation();
@@ -13,6 +14,19 @@ export const SubjectEditor = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', shortName: '', color: '#646cff' });
+
+  const { query, setQuery, sort, toggleSort, rows: displayedSubjects, total, shown } = useTableControls<Subject>({
+    rows: subjects,
+    getSearchText: (subject) => `${subject.name} ${subject.shortName || ''}`,
+    getSortValue: (subject, key) => {
+      switch (key) {
+        case 'name': return subject.name;
+        case 'shortName': return subject.shortName || '';
+        default: return subject.name;
+      }
+    },
+    defaultSort: { key: 'name', direction: 'asc' },
+  });
 
   const handleAdd = () => {
     if (!newItem.name.trim()) return;
@@ -105,17 +119,22 @@ export const SubjectEditor = () => {
         </FormField>
       </Modal>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
       <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('name')}</th>
-            <th>{t('short_code')}</th>
+            <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('short_code')} sortKey="shortName" sort={sort} onSort={toggleSort} />
             <th style={{ width: '80px' }}>{t('color')}</th>
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {subjects.map(item => (
+          {displayedSubjects.map(item => (
             <tr key={item.id}>
               <td>
                 <input 
@@ -144,9 +163,9 @@ export const SubjectEditor = () => {
               </td>
             </tr>
           ))}
-          {subjects.length === 0 && (
+          {displayedSubjects.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">{t('no_subjects')}</td>
+              <td colSpan={4} className="empty-row">{subjects.length === 0 ? t('no_subjects') : t('no_results')}</td>
             </tr>
           )}
         </tbody>

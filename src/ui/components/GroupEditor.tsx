@@ -4,6 +4,7 @@ import { Group } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 export const GroupEditor = () => {
   const { t } = useTranslation();
@@ -13,6 +14,32 @@ export const GroupEditor = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', grade: 1, shift: 'first' as 'first' | 'second' });
+  const [gradeFilter, setGradeFilter] = useState('');
+  const [shiftFilter, setShiftFilter] = useState('');
+
+  const grades = [...new Set(groups.map(g => g.grade))].sort((a, b) => a - b);
+
+  const { query, setQuery, sort, toggleSort, rows: displayedGroups, total, shown } = useTableControls<Group>({
+    rows: groups,
+    getSearchText: (group) => `${group.name} ${group.subgroups.join(' ')}`,
+    getSortValue: (group, key) => {
+      switch (key) {
+        case 'name': return group.name;
+        case 'grade': return group.grade;
+        case 'maxDailyLessons': return group.maxDailyLessons ?? 8;
+        default: return group.name;
+      }
+    },
+    extraFilter: (group) => {
+      if (gradeFilter && group.grade !== parseInt(gradeFilter)) return false;
+      if (shiftFilter) {
+        const shift = group.periodStart === 6 ? 'second' : 'first';
+        if (shift !== shiftFilter) return false;
+      }
+      return true;
+    },
+    defaultSort: { key: 'name', direction: 'asc' },
+  });
 
   const handleAdd = () => {
     if (!newItem.name.trim()) return;
@@ -111,20 +138,34 @@ export const GroupEditor = () => {
         </FormField>
       </Modal>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <select className="table-filter" value={gradeFilter} onChange={(e) => setGradeFilter(e.target.value)}>
+          <option value="">{t('all_grades')}</option>
+          {grades.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select className="table-filter" value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}>
+          <option value="">{t('all_shifts')}</option>
+          <option value="first">{t('shift_first')}</option>
+          <option value="second">{t('shift_second')}</option>
+        </select>
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
         <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('name')}</th>
-            <th>{t('grade')}</th>
+            <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('grade')} sortKey="grade" sort={sort} onSort={toggleSort} />
             <th>{t('shift')}</th>
             <th>{t('periods')}</th>
-            <th>{t('max_daily')}</th>
+            <SortableTh label={t('max_daily')} sortKey="maxDailyLessons" sort={sort} onSort={toggleSort} />
             <th>{t('subgroups')}</th>
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {groups.map(item => (
+          {displayedGroups.map(item => (
             <tr key={item.id}>
               <td>
                 <input 
@@ -174,9 +215,9 @@ export const GroupEditor = () => {
               </td>
             </tr>
           ))}
-          {groups.length === 0 && (
+          {displayedGroups.length === 0 && (
             <tr>
-              <td colSpan={7} className="empty-row">{t('no_groups')}</td>
+              <td colSpan={7} className="empty-row">{groups.length === 0 ? t('no_groups') : t('no_results')}</td>
             </tr>
           )}
         </tbody>

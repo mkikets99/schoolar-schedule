@@ -4,6 +4,7 @@ import { Room } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 export const RoomEditor = () => {
   const { t } = useTranslation();
@@ -13,6 +14,24 @@ export const RoomEditor = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', capacity: 30 });
+  const [typeFilter, setTypeFilter] = useState('');
+
+  const roomTypes = [...new Set(rooms.flatMap(r => r.types))].sort();
+
+  const { query, setQuery, sort, toggleSort, rows: displayedRooms, total, shown } = useTableControls<Room>({
+    rows: rooms,
+    getSearchText: (room) => `${room.name} ${room.types.join(' ')}`,
+    getSortValue: (room, key) => {
+      switch (key) {
+        case 'name': return room.name;
+        case 'capacity': return room.capacity ?? 0;
+        case 'types': return room.types.join(', ');
+        default: return room.name;
+      }
+    },
+    extraFilter: typeFilter ? (room) => room.types.includes(typeFilter) : undefined,
+    defaultSort: { key: 'name', direction: 'asc' },
+  });
 
   const handleAdd = () => {
     if (!newItem.name.trim()) return;
@@ -98,17 +117,26 @@ export const RoomEditor = () => {
         </FormField>
       </Modal>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <select className="table-filter" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <option value="">{t('all_types')}</option>
+          {roomTypes.map(type => <option key={type} value={type}>{type}</option>)}
+        </select>
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
       <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('name')}</th>
-            <th>{t('capacity_students')}</th>
-            <th>{t('types')}</th>
+            <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('capacity_students')} sortKey="capacity" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('types')} sortKey="types" sort={sort} onSort={toggleSort} />
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {rooms.map(item => (
+          {displayedRooms.map(item => (
             <tr key={item.id}>
               <td>
                 <input 
@@ -130,9 +158,9 @@ export const RoomEditor = () => {
               </td>
             </tr>
           ))}
-          {rooms.length === 0 && (
+          {displayedRooms.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">{t('no_rooms')}</td>
+              <td colSpan={4} className="empty-row">{rooms.length === 0 ? t('no_rooms') : t('no_results')}</td>
             </tr>
           )}
         </tbody>

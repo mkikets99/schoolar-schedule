@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AcademicYear } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 export const SchoolEditor = () => {
   const { t } = useTranslation();
@@ -28,6 +29,20 @@ export const SchoolEditor = () => {
   };
 
   const academicYears = project?.academicYears || [];
+
+  const { query, setQuery, sort, toggleSort, rows: displayedYears, total, shown } = useTableControls<AcademicYear>({
+    rows: academicYears,
+    getSearchText: (year) => `${year.name} ${year.startDate} ${year.endDate}`,
+    getSortValue: (year, key) => {
+      switch (key) {
+        case 'name': return year.name;
+        case 'startDate': return year.startDate;
+        case 'endDate': return year.endDate;
+        default: return year.name;
+      }
+    },
+    defaultSort: { key: 'name', direction: 'asc' },
+  });
 
   const handleAddYear = () => {
     if (!newYear.name.trim() || !newYear.startDate || !newYear.endDate) return;
@@ -116,17 +131,22 @@ export const SchoolEditor = () => {
         </FormField>
       </Modal>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
       <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('year_name')}</th>
-            <th>{t('start_date')}</th>
-            <th>{t('end_date')}</th>
+            <SortableTh label={t('year_name')} sortKey="name" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('start_date')} sortKey="startDate" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('end_date')} sortKey="endDate" sort={sort} onSort={toggleSort} />
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {academicYears.map(year => (
+          {displayedYears.map(year => (
             <tr key={year.id}>
               <td>
                 <input type="text" value={year.name} onChange={(e) => handleUpdateYear(year.id, { name: e.target.value })} />
@@ -142,8 +162,8 @@ export const SchoolEditor = () => {
               </td>
             </tr>
           ))}
-          {academicYears.length === 0 && (
-            <tr><td colSpan={4} className="empty-row">{t('no_years')}</td></tr>
+          {displayedYears.length === 0 && (
+            <tr><td colSpan={4} className="empty-row">{academicYears.length === 0 ? t('no_years') : t('no_results')}</td></tr>
           )}
         </tbody>
       </table>

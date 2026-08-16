@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CurriculumRule } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
+import { useTableControls, TableSearch, SortableTh } from './TableControls';
 
 interface SubgroupEntry {
   id: string;
@@ -20,6 +21,9 @@ export const CurriculumEditor = () => {
   const rooms = project?.rooms || [];
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [groupFilter, setGroupFilter] = useState('');
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [splitsOnly, setSplitsOnly] = useState(false);
   const [newItem, setNewItem] = useState({
     groupId: '',
     subjectId: '',
@@ -94,14 +98,46 @@ export const CurriculumEditor = () => {
 
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || 'Unknown';
   const getSubjectName = (id: string) => subjects.find(s => s.id === id)?.name || 'Unknown';
+  const getTeacherName = (id?: string) => (id ? teachers.find(t => t.id === id)?.name || '' : '');
+  const getRoomName = (id?: string) => (id ? rooms.find(r => r.id === id)?.name || '' : '');
 
-  const isDuplicate = (item: typeof curriculum[0], index: number) =>
-    curriculum.some((other, oi) =>
-      oi !== index &&
+  const isSplitRule = (item: CurriculumRule) =>
+    curriculum.some(other =>
+      other.id !== item.id &&
       other.groupId === item.groupId &&
-      other.subjectId === item.subjectId &&
-      index > oi
+      other.subjectId === item.subjectId
     );
+
+  const isDuplicate = (item: CurriculumRule) => {
+    const sameKey = curriculum.filter(o =>
+      o.groupId === item.groupId && o.subjectId === item.subjectId
+    );
+    return sameKey.length > 1 && sameKey[0].id !== item.id;
+  };
+
+  const { query, setQuery, sort, toggleSort, rows: displayedCurriculum, total, shown } = useTableControls<CurriculumRule>({
+    rows: curriculum,
+    getSearchText: (rule) =>
+      `${getGroupName(rule.groupId)} ${getSubjectName(rule.subjectId)} ${getTeacherName(rule.teacherId)} ${getRoomName(rule.roomId)}`,
+    getSortValue: (rule, key) => {
+      switch (key) {
+        case 'group': return getGroupName(rule.groupId);
+        case 'subject': return getSubjectName(rule.subjectId);
+        case 'hours': return rule.hoursPerWeek;
+        case 'teacher': return getTeacherName(rule.teacherId);
+        case 'room': return getRoomName(rule.roomId);
+        case 'split': return isSplitRule(rule) ? 1 : 0;
+        default: return getGroupName(rule.groupId);
+      }
+    },
+    extraFilter: (rule) => {
+      if (groupFilter && rule.groupId !== groupFilter) return false;
+      if (subjectFilter && rule.subjectId !== subjectFilter) return false;
+      if (splitsOnly && !isSplitRule(rule)) return false;
+      return true;
+    },
+    defaultSort: { key: 'group', direction: 'asc' },
+  });
 
   return (
     <div className="entity-editor">
@@ -199,21 +235,38 @@ export const CurriculumEditor = () => {
         )}
       </Modal>
 
+      <div className="table-toolbar">
+        <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
+        <select className="table-filter" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+          <option value="">{t('all_groups')}</option>
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+        <select className="table-filter" value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}>
+          <option value="">{t('all_subjects')}</option>
+          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <label className="table-toggle">
+          <input type="checkbox" checked={splitsOnly} onChange={(e) => setSplitsOnly(e.target.checked)} />
+          {t('splits_only')}
+        </label>
+        <span className="table-count">{t('showing_count', { shown, total })}</span>
+      </div>
+
       <table className="editor-table">
         <thead>
           <tr>
-            <th>{t('group')}</th>
-            <th>{t('subject')}</th>
-            <th style={{ width: '80px' }}>{t('hours')}</th>
-            <th>{t('teacher')}</th>
-            <th>{t('room')}</th>
-            <th style={{ width: '60px' }}>{t('split')}</th>
+            <SortableTh label={t('group')} sortKey="group" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('subject')} sortKey="subject" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('hours')} sortKey="hours" sort={sort} onSort={toggleSort} style={{ width: '80px' }} />
+            <SortableTh label={t('teacher')} sortKey="teacher" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('room')} sortKey="room" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('split')} sortKey="split" sort={sort} onSort={toggleSort} style={{ width: '60px' }} />
             <th style={{ width: '80px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {curriculum.map((item, index) => {
-            const dup = isDuplicate(item, index);
+          {displayedCurriculum.map((item) => {
+            const dup = isDuplicate(item);
             return (
               <tr key={item.id} className={dup ? 'split-group' : ''}>
                 <td>{getGroupName(item.groupId)}</td>
@@ -255,9 +308,9 @@ export const CurriculumEditor = () => {
               </tr>
             );
           })}
-          {curriculum.length === 0 && (
+          {displayedCurriculum.length === 0 && (
             <tr>
-              <td colSpan={7} className="empty-row">{t('no_rules')}</td>
+              <td colSpan={7} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
             </tr>
           )}
         </tbody>
