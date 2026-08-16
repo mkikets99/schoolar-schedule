@@ -24,6 +24,11 @@ async function generateTestSchedule(project: ProjectState) {
   const groupBusy = new Set<string>();
   const roomBusy = new Set<string>();
 
+  const groupGrade = new Map<string, number>();
+  for (const group of project.groups || []) {
+    groupGrade.set(group.id, group.grade ?? 0);
+  }
+
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
   for (const c of project.constraints || []) {
@@ -328,6 +333,30 @@ async function generateTestSchedule(project: ProjectState) {
     return result;
   }
 
+  function gradeAdjacencyScore(unit: SchedulingUnit, day: string, period: number): number {
+    const grade = groupGrade.get(unit.groupId);
+    if (grade === undefined) return 0;
+    const near = unit.type === 'double' ? [period - 1, period + 2] : [period - 1, period + 1];
+    let score = 0;
+    for (const s of schedule) {
+      if (s.groupId === unit.groupId) continue;
+      if (s.day !== day) continue;
+      if (!near.includes(s.period)) continue;
+      if (groupGrade.get(s.groupId) === grade) score++;
+    }
+    return score;
+  }
+
+  function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
+    const base = getPeriodsForGroup(unit.groupId);
+    return base.slice().sort((a, b) => {
+      const sa = gradeAdjacencyScore(unit, day, a);
+      const sb = gradeAdjacencyScore(unit, day, b);
+      if (sa !== sb) return sb - sa;
+      return a - b;
+    });
+  }
+
   let unitsAssigned = 0;
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
@@ -350,7 +379,7 @@ async function generateTestSchedule(project: ProjectState) {
     for (const ds of dayScores) {
       if (placed) break;
       if (ds.need === -999) continue;
-      const ordered = getPeriodsForGroup(unit.groupId);
+      const ordered = getOrderedPeriods(unit, ds.day);
       for (const p of ordered) {
         if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
       }
@@ -363,7 +392,7 @@ async function generateTestSchedule(project: ProjectState) {
         const extra = unitSlotCount(unit);
         if (counts[di] >= maxDaily) continue;
         if (counts[di] + extra > maxDaily) continue;
-        const ordered = getPeriodsForGroup(unit.groupId);
+        const ordered = getOrderedPeriods(unit, day);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
@@ -830,6 +859,36 @@ describe('Worker scheduling algorithm', () => {
       const key = `${lesson.teacherId}-${lesson.day}-${lesson.period}`;
       expect(teacherSlots.has(key)).toBe(false);
       teacherSlots.add(key);
+    }
+  });
+
+  it('prefers placing lessons of same-grade classes in adjacent periods', async () => {
+    const project = makeProject({
+      teachers: [
+        { id: 't1', name: 'Teacher A', subjects: ['subj-math'] },
+        { id: 't2', name: 'Teacher B', subjects: ['subj-math'] },
+      ],
+      groups: [
+        { id: 'g1', name: '6-A', grade: 6, subgroups: [] },
+        { id: 'g2', name: '6-B', grade: 6, subgroups: [] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj-math', hoursPerWeek: 2, teacherId: 't2', roomId: 'r2' },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    expect(result.schedule).toHaveLength(4);
+    expect(result.conflicts).toHaveLength(0);
+
+    for (const lesson of result.schedule) {
+      const sameDay = result.schedule.filter(
+        (l: any) => l.groupId !== lesson.groupId && l.day === lesson.day
+      );
+      expect(sameDay).toHaveLength(1);
+      expect(Math.abs(sameDay[0].period - lesson.period)).toBe(1);
     }
   });
 });

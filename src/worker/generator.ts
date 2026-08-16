@@ -45,6 +45,11 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     });
   }
 
+  const groupGrade = new Map<string, number>();
+  for (const group of project.groups || []) {
+    groupGrade.set(group.id, group.grade ?? 0);
+  }
+
   emit({ type: 'PROGRESS', payload: { progress: 2 } });
 
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
@@ -339,6 +344,30 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     return result;
   }
 
+  function gradeAdjacencyScore(unit: SchedulingUnit, day: string, period: number): number {
+    const grade = groupGrade.get(unit.groupId);
+    if (grade === undefined) return 0;
+    const near = unit.type === 'double' ? [period - 1, period + 2] : [period - 1, period + 1];
+    let score = 0;
+    for (const s of schedule) {
+      if (s.groupId === unit.groupId) continue;
+      if (s.day !== day) continue;
+      if (!near.includes(s.period)) continue;
+      if (groupGrade.get(s.groupId) === grade) score++;
+    }
+    return score;
+  }
+
+  function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
+    const base = getPeriodsForGroup(unit.groupId);
+    return base.slice().sort((a, b) => {
+      const sa = gradeAdjacencyScore(unit, day, a);
+      const sb = gradeAdjacencyScore(unit, day, b);
+      if (sa !== sb) return sb - sa;
+      return a - b;
+    });
+  }
+
   for (const unit of units) {
     const targets = dailyTargets.get(unit.groupId)!;
     const counts = dailyCounts.get(unit.groupId)!;
@@ -361,7 +390,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       if (placed) break;
       if (ds.need === -999) continue;
 
-      const ordered = getPeriodsForGroup(unit.groupId);
+      const ordered = getOrderedPeriods(unit, ds.day);
       for (const p of ordered) {
         if (tryPlaceUnit(unit, ds.day, p)) { placed = true; break; }
       }
@@ -374,7 +403,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
         const extra = unitSlotCount(unit);
         if (counts[di] >= maxDaily) continue;
         if (counts[di] + extra > maxDaily) continue;
-        const ordered = getPeriodsForGroup(unit.groupId);
+        const ordered = getOrderedPeriods(unit, day);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
         }
