@@ -30,7 +30,7 @@ interface LessonStub {
 }
 
 interface SchedulingUnit {
-  type: 'single' | 'split';
+  type: 'single' | 'split' | 'double';
   groupId: string;
   lessons: LessonStub[];
 }
@@ -57,6 +57,16 @@ async function generateSchedule(project: ProjectState) {
   }
 
   self.postMessage({ type: 'PROGRESS', payload: { progress: 2 } });
+
+  const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
+  const noFirstRules: { subjectId: string; groupId?: string }[] = [];
+  for (const c of project.constraints || []) {
+    if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
+      teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
+    } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
+      noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
+    }
+  }
 
   const teacherBusy = new Set<string>();
   const groupBusy = new Set<string>();
@@ -93,30 +103,64 @@ async function generateSchedule(project: ProjectState) {
       }
     } else {
       const rule = rules[0];
-      for (let h = 0; h < rule.hoursPerWeek; h++) {
-        units.push({
-          type: 'single',
-          groupId,
-          lessons: [{
-            id: crypto.randomUUID(),
-            ruleId: rule.id,
-            groupId: rule.groupId,
-            subjectId: rule.subjectId,
-            teacherId: rule.teacherId,
-            roomId: rule.roomId,
-          }],
-        });
+      if (rule.doubleLesson) {
+        const totalLessons = Math.floor(rule.hoursPerWeek);
+        const pairs = Math.floor(totalLessons / 2);
+        const leftover = totalLessons % 2;
+        for (let p = 0; p < pairs; p++) {
+          units.push({
+            type: 'double',
+            groupId,
+            lessons: [1, 2].map(() => ({
+              id: crypto.randomUUID(),
+              ruleId: rule.id,
+              groupId: rule.groupId,
+              subjectId: rule.subjectId,
+              teacherId: rule.teacherId,
+              roomId: rule.roomId,
+            })),
+          });
+        }
+        for (let h = 0; h < leftover; h++) {
+          units.push({
+            type: 'single',
+            groupId,
+            lessons: [{
+              id: crypto.randomUUID(),
+              ruleId: rule.id,
+              groupId: rule.groupId,
+              subjectId: rule.subjectId,
+              teacherId: rule.teacherId,
+              roomId: rule.roomId,
+            }],
+          });
+        }
+      } else {
+        for (let h = 0; h < rule.hoursPerWeek; h++) {
+          units.push({
+            type: 'single',
+            groupId,
+            lessons: [{
+              id: crypto.randomUUID(),
+              ruleId: rule.id,
+              groupId: rule.groupId,
+              subjectId: rule.subjectId,
+              teacherId: rule.teacherId,
+              roomId: rule.roomId,
+            }],
+          });
+        }
       }
     }
   }
 
-  const batchCounts = new Map<string, number>();
+  const groupLessonTotals = new Map<string, number>();
   for (const unit of units) {
-    batchCounts.set(unit.groupId, (batchCounts.get(unit.groupId) || 0) + 1);
+    groupLessonTotals.set(unit.groupId, (groupLessonTotals.get(unit.groupId) || 0) + unit.lessons.length);
   }
 
   const dailyTargets = new Map<string, number[]>();
-  for (const [gid, total] of batchCounts) {
+  for (const [gid, total] of groupLessonTotals) {
     const cfg = groupConfig.get(gid);
     const maxDaily = cfg?.maxDaily ?? 8;
     const raw = days.map(() => 0);
@@ -132,13 +176,16 @@ async function generateSchedule(project: ProjectState) {
   }
 
   const dailyCounts = new Map<string, number[]>();
-  for (const gid of batchCounts.keys()) {
+  for (const gid of groupLessonTotals.keys()) {
     dailyCounts.set(gid, days.map(() => 0));
   }
 
   units.sort((a, b) => {
-    const ta = batchCounts.get(a.groupId) || 0;
-    const tb = batchCounts.get(b.groupId) || 0;
+    const da = a.type === 'double' ? 0 : 1;
+    const db = b.type === 'double' ? 0 : 1;
+    if (da !== db) return da - db;
+    const ta = groupLessonTotals.get(a.groupId) || 0;
+    const tb = groupLessonTotals.get(b.groupId) || 0;
     if (ta !== tb) return tb - ta;
     const aa = a.lessons[0]?.teacherId || '';
     const ab = b.lessons[0]?.teacherId || '';
@@ -169,10 +216,29 @@ async function generateSchedule(project: ProjectState) {
     return fallback?.id;
   }
 
+  function isTeacherBusyRule(teacherId: string, day: string, period: number): boolean {
+    for (const rule of teacherBusyRules) {
+      if (rule.teacherId !== teacherId) continue;
+      if (rule.day !== '*' && rule.day !== day) continue;
+      if (rule.periods.has(period)) return true;
+    }
+    return false;
+  }
+
+  function isForbiddenFirstPeriod(lesson: LessonStub, period: number, periodStart: number): boolean {
+    if (period !== periodStart) return false;
+    return noFirstRules.some(r =>
+      r.subjectId === lesson.subjectId && (!r.groupId || r.groupId === lesson.groupId)
+    );
+  }
+
   function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean): boolean {
     const slotKey = `${day}-${period}`;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
     if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
+    if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
+    const cfg = groupConfig.get(lesson.groupId);
+    if (isForbiddenFirstPeriod(lesson, period, cfg?.periodStart ?? 1)) return false;
     if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
       const alt = findFallbackRoom(lesson.roomId, slotKey);
       if (!alt) return false;
@@ -202,6 +268,47 @@ async function generateSchedule(project: ProjectState) {
     groupBusy.add(`${lesson.groupId}-${slotKey}`);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
     roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
+
+    const di = days.indexOf(day);
+    if (di >= 0) {
+      const counts = dailyCounts.get(lesson.groupId);
+      if (counts) counts[di]++;
+    }
+  }
+
+  function tryPlaceDouble(unit: SchedulingUnit, day: string, period: number): boolean {
+    const lesson = unit.lessons[0];
+    const cfg = groupConfig.get(unit.groupId);
+    const pEnd = cfg?.periodEnd ?? 8;
+    if (period + 1 > pEnd) return false;
+    if (!canPlace(lesson, day, period, false)) return false;
+    if (!canPlace(lesson, day, period + 1, false)) return false;
+    placeLesson(lesson, day, period);
+    placeLesson(unit.lessons[1], day, period + 1);
+    return true;
+  }
+
+  function placeAsSingles(unit: SchedulingUnit) {
+    for (const lesson of unit.lessons) {
+      let placed = false;
+      for (const day of days) {
+        if (placed) break;
+        const counts = dailyCounts.get(unit.groupId);
+        const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
+        if ((counts?.[days.indexOf(day)] ?? 0) >= maxDaily) continue;
+        const ordered = orderPeriodsForSchool(unit.groupId, day, getPeriodsForGroup(unit.groupId));
+        for (const p of ordered) {
+          if (canPlace(lesson, day, p, false)) {
+            placeLesson(lesson, day, p);
+            placed = true;
+            break;
+          }
+        }
+      }
+      if (!placed) {
+        conflicts.push({ type: 'UNASSIGNED_HOURS', ruleId: lesson.ruleId, missing: 1 });
+      }
+    }
   }
 
   function tryPlaceUnit(unit: SchedulingUnit, day: string, period: number): boolean {
@@ -209,6 +316,10 @@ async function generateSchedule(project: ProjectState) {
       if (!canPlace(unit.lessons[0], day, period, false)) return false;
       placeLesson(unit.lessons[0], day, period);
       return true;
+    }
+
+    if (unit.type === 'double') {
+      return tryPlaceDouble(unit, day, period);
     }
 
     const first = unit.lessons[0];
@@ -278,10 +389,13 @@ async function generateSchedule(project: ProjectState) {
     const cfg = groupConfig.get(unit.groupId);
     const maxDaily = cfg?.maxDaily ?? 8;
 
-    const dayScores = days.map((day, di) => ({
-      day, index: di,
-      need: counts[di] >= maxDaily ? -999 : targets[di] - counts[di],
-    }));
+    const dayScores = days.map((day, di) => {
+      const fits = unit.type === 'double' ? counts[di] + 2 <= maxDaily : true;
+      return {
+        day, index: di,
+        need: counts[di] >= maxDaily || !fits ? -999 : targets[di] - counts[di],
+      };
+    });
     dayScores.sort((a, b) => b.need - a.need);
 
     let placed = false;
@@ -321,6 +435,7 @@ async function generateSchedule(project: ProjectState) {
         if (placed) break;
         const di = days.indexOf(day);
         if (counts[di] >= maxDaily) continue;
+        if (unit.type === 'double' && counts[di] + 2 > maxDaily) continue;
         const ordered = orderPeriodsForSchool(unit.groupId, day, allPeriods);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
@@ -328,9 +443,12 @@ async function generateSchedule(project: ProjectState) {
       }
     }
 
+    if (!placed && unit.type === 'double') {
+      placeAsSingles(unit);
+      placed = true;
+    }
+
     if (placed) {
-      const di = days.indexOf(schedule[schedule.length - 1].day);
-      if (di >= 0) counts[di]++;
       unitsAssigned++;
     } else {
       for (const lesson of unit.lessons) {

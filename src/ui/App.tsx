@@ -10,7 +10,7 @@ import { GroupEditor } from './components/GroupEditor';
 import { CurriculumEditor } from './components/CurriculumEditor';
 import { LoadDistributionUI } from './components/LoadDistributionUI';
 import { ScheduleViewer } from './components/ScheduleViewer';
-import { ConstraintInspector } from './components/ConstraintInspector';
+import { ConstraintEditor } from './components/ConstraintEditor';
 import { exportProject } from './services/ProjectExportService';
 import './index.css';
 
@@ -188,7 +188,7 @@ function AppContent() {
               {currentView === 'groups' && <section className="editor-view"><GroupEditor /></section>}
               {currentView === 'curriculum' && <section className="editor-view"><CurriculumEditor /></section>}
               {currentView === 'load' && <section className="editor-view"><LoadDistributionUI /></section>}
-              {currentView === 'constraints' && <section className="editor-view"><ConstraintInspector /></section>}
+              {currentView === 'constraints' && <section className="editor-view"><ConstraintEditor /></section>}
               {currentView === 'schedule' && (
                 <section className="schedule-view">
                   <div className="view-header">

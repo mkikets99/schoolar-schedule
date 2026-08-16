@@ -1097,67 +1097,53 @@ tr.split-group + tr.split-group td {
   text-transform: uppercase;
 }
 
-.constraint-inspector .no-conflicts {
-  text-align: center;
-  padding: 3rem;
-  color: #4CAF50;
-  font-size: 1.1rem;
-  background-color: #1e1e1e;
-  border-radius: 8px;
-  border: 1px solid #333;
+.period-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.conflict-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.conflict-item {
-  display: flex;
-  gap: 1rem;
-  background-color: #1e1e1e;
-  padding: 1rem;
+.period-chip {
+  padding: 0.35rem 0.7rem;
   border-radius: 6px;
+  background: #1e1e1e;
   border: 1px solid #333;
-  align-items: flex-start;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #ccc;
+  user-select: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.conflict-item.conflict-hard {
-  border-left: 4px solid #ff4d4d;
+.period-chip:hover {
+  border-color: #646cff;
 }
 
-.conflict-item.conflict-soft {
-  border-left: 4px solid #FFC107;
+.period-chip.active {
+  background: #646cff33;
+  border-color: #646cff;
+  color: #fff;
 }
 
-.conflict-badge {
-  flex-shrink: 0;
-  padding: 0.25rem 0.5rem;
+.constraint-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
   border-radius: 4px;
   font-size: 0.7rem;
-  font-weight: bold;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
-.conflict-hard .conflict-badge {
-  background-color: #ff4d4d33;
-  color: #ff4d4d;
+.constraint-badge.teacher-busy {
+  background: #646cff33;
+  color: #646cff;
 }
 
-.conflict-soft .conflict-badge {
-  background-color: #FFC10733;
+.constraint-badge.no-first {
+  background: #FFC10733;
   color: #FFC107;
-}
-
-.conflict-body {
-  flex: 1;
-}
-
-.conflict-desc {
-  margin: 0;
-  font-size: 0.9rem;
-  color: #ccc;
 }
 
 .project-info {

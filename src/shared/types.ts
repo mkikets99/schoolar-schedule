@@ -55,6 +55,7 @@ export interface CurriculumRule {
   hoursPerWeek: number;
   teacherId?: string; // Default teacher
   roomId?: string; // Default room
+  doubleLesson?: boolean; // Prefer consecutive double lessons when scheduling
 }
 
 export interface LoadDistribution {
@@ -64,12 +65,16 @@ export interface LoadDistribution {
   hours: number;
 }
 
+export type ConstraintKind = 'TEACHER_BUSY' | 'NO_FIRST_PERIOD';
+
 export interface Constraint {
   id: string;
-  type: 'HARD' | 'SOFT';
-  category: 'TEACHER_AVAILABILITY' | 'ROOM_AVAILABILITY' | 'GROUP_OVERLAP' | 'CURRICULUM_MATCH';
-  targetId: string; // ID of the entity this constraint applies to
-  payload: any; // Specific constraint data (e.g., time slots)
+  kind: ConstraintKind;
+  teacherId?: string; // TEACHER_BUSY: teacher that is unavailable
+  day?: string; // TEACHER_BUSY: weekday key or '*' for every day
+  periods?: number[]; // TEACHER_BUSY: blocked periods of the day
+  subjectId?: string; // NO_FIRST_PERIOD: subject that cannot be the first lesson
+  groupId?: string; // NO_FIRST_PERIOD: optional scope (all groups when empty)
 }
 
 export interface Lesson {

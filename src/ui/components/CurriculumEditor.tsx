@@ -30,6 +30,7 @@ export const CurriculumEditor = () => {
     hours: 1,
     teacherId: '',
     roomId: '',
+    double: false,
   });
   const [splitMode, setSplitMode] = useState(false);
   const [splitCount, setSplitCount] = useState(2);
@@ -72,11 +73,12 @@ export const CurriculumEditor = () => {
         hoursPerWeek: newItem.hours,
         teacherId: newItem.teacherId || undefined,
         roomId: newItem.roomId || undefined,
+        doubleLesson: newItem.double || undefined,
       };
       updateCurriculum([...curriculum, rule]);
     }
 
-    setNewItem({ groupId: '', subjectId: '', hours: 1, teacherId: '', roomId: '' });
+    setNewItem({ groupId: '', subjectId: '', hours: 1, teacherId: '', roomId: '', double: false });
     setSplitMode(false);
     setSplitCount(2);
     setSubgroups([
@@ -127,6 +129,7 @@ export const CurriculumEditor = () => {
         case 'teacher': return getTeacherName(rule.teacherId);
         case 'room': return getRoomName(rule.roomId);
         case 'split': return isSplitRule(rule) ? 1 : 0;
+        case 'double': return rule.doubleLesson ? 1 : 0;
         default: return getGroupName(rule.groupId);
       }
     },
@@ -185,6 +188,15 @@ export const CurriculumEditor = () => {
             {t('split_into_subgroups')}
           </label>
         </div>
+
+        {!splitMode && (
+          <div className="form-field">
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input type="checkbox" checked={newItem.double} onChange={(e) => setNewItem({ ...newItem, double: e.target.checked })} />
+              {t('double_lesson')}
+            </label>
+          </div>
+        )}
 
         {splitMode && (
           <>
@@ -261,6 +273,7 @@ export const CurriculumEditor = () => {
             <SortableTh label={t('teacher')} sortKey="teacher" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('room')} sortKey="room" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('split')} sortKey="split" sort={sort} onSort={toggleSort} style={{ width: '60px' }} />
+            <SortableTh label={t('double_lesson')} sortKey="double" sort={sort} onSort={toggleSort} style={{ width: '60px' }} />
             <th style={{ width: '80px' }}>{t('actions')}</th>
           </tr>
         </thead>
@@ -302,6 +315,14 @@ export const CurriculumEditor = () => {
                 <td style={{ textAlign: 'center' }}>
                   {dup && <span className="split-badge">{t('split')}</span>}
                 </td>
+                <td style={{ textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!item.doubleLesson}
+                    onChange={(e) => handleUpdate(item.id, { doubleLesson: e.target.checked })}
+                    title={t('double_lesson')}
+                  />
+                </td>
                 <td>
                   <button onClick={() => handleRemove(item.id)} className="delete-btn">{t('delete')}</button>
                 </td>
@@ -310,7 +331,7 @@ export const CurriculumEditor = () => {
           })}
           {displayedCurriculum.length === 0 && (
             <tr>
-              <td colSpan={7} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
+              <td colSpan={8} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
             </tr>
           )}
         </tbody>
