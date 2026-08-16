@@ -249,7 +249,7 @@ const constraints = [];
 
 const manifest = {
   version: '1.0.0',
-  school: { id: 'sch-001', name: 'Big Example School', splitSubjects: ['s-info', 's-tech'] },
+  school: { id: 'sch-001', name: 'Big Example School' },
   exportedAt: new Date().toISOString(),
   files: [
     'academic_years.json', 'teachers.json', 'subjects.json', 'rooms.json',

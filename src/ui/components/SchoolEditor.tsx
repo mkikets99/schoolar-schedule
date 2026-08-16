@@ -19,15 +19,6 @@ export const SchoolEditor = () => {
     }
   };
 
-  const handleToggleSplitSubject = (subjectId: string) => {
-    if (!project) return;
-    const current = project.school.splitSubjects || [];
-    const next = current.includes(subjectId)
-      ? current.filter(s => s !== subjectId)
-      : [...current, subjectId];
-    updateSchool({ ...project.school, splitSubjects: next });
-  };
-
   const academicYears = project?.academicYears || [];
 
   const { query, setQuery, sort, toggleSort, rows: displayedYears, total, shown } = useTableControls<AcademicYear>({
@@ -83,27 +74,6 @@ export const SchoolEditor = () => {
           <div>
             <button onClick={handleSaveSchool} className="primary-btn">{t('save')}</button>
           </div>
-        </div>
-      </div>
-
-      <div className="section-card">
-        <h3 className="section-title">{t('split_subjects')}</h3>
-        <p className="section-desc">{t('split_subjects_desc')}</p>
-        <div className="checkbox-grid">
-          {(project?.subjects || []).map(subj => {
-            const isSplit = (project?.school.splitSubjects || []).includes(subj.id);
-            return (
-              <label key={subj.id} className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={isSplit}
-                  onChange={() => handleToggleSplitSubject(subj.id)}
-                />
-                <span>{subj.name}</span>
-              </label>
-            );
-          })}
-          {(project?.subjects || []).length === 0 && <span className="empty-hint">{t('no_subjects_yet')}</span>}
         </div>
       </div>
 

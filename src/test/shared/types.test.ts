@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   ProjectState,
-  School,
   Teacher,
   Subject,
   Room,
@@ -98,10 +97,5 @@ describe('ProjectState structure', () => {
     expect(g.periodStart).toBeUndefined();
     expect(g.periodEnd).toBeUndefined();
     expect(g.maxDailyLessons).toBeUndefined();
-  });
-
-  it('supports splitSubjects on School', () => {
-    const s: School = { id: 's1', name: 'Test', splitSubjects: ['subj1', 'subj2'] };
-    expect(s.splitSubjects).toEqual(['subj1', 'subj2']);
   });
 });

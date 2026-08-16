@@ -6,7 +6,6 @@ export interface School {
   id: string;
   name: string;
   address?: string;
-  splitSubjects?: string[];
 }
 
 export interface AcademicYear {
