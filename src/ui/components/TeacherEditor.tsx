@@ -6,6 +6,7 @@ import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
 import { SearchableSelect } from './SearchableSelect';
+import { MultiSelect } from './MultiSelect';
 
 export const TeacherEditor = () => {
   const { t } = useTranslation();
@@ -161,7 +162,14 @@ export const TeacherEditor = () => {
                   onChange={(e) => handleUpdateTeacher(teacher.id, { shortName: e.target.value })}
                 />
               </td>
-              <td>{teacher.subjects.length}</td>
+              <td>
+                <MultiSelect
+                  value={teacher.subjects}
+                  onChange={(subjects) => handleUpdateTeacher(teacher.id, { subjects })}
+                  options={subjects.map(s => ({ value: s.id, label: s.name }))}
+                  placeholder={t('no_subjects')}
+                />
+              </td>
               <td>
                 <button onClick={() => handleRemoveTeacher(teacher.id)} className="delete-btn">{t('delete')}</button>
               </td>

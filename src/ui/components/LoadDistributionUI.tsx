@@ -4,6 +4,7 @@ import { useProject } from '../context/ProjectContext';
 import { LoadDistribution } from '../../shared/types';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
 import { SearchableSelect } from './SearchableSelect';
+import { eligibleTeacherOptions } from '../../shared/eligibility';
 
 export const LoadDistributionUI = () => {
   const { t } = useTranslation();
@@ -163,7 +164,7 @@ export const LoadDistributionUI = () => {
                 <SearchableSelect
                   value={rule.teacherId || ''}
                   onChange={(v) => handleAssignTeacher(rule.id, v || undefined)}
-                  options={teachers.map(tchr => ({ value: tchr.id, label: tchr.name }))}
+                  options={eligibleTeacherOptions(teachers, rule.subjectId)}
                   placeholder={t('unassigned')}
                   allowEmpty
                   disabled={!isDraft}

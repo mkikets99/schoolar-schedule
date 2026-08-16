@@ -1763,4 +1763,25 @@ tr.split-group + tr.split-group td {
   font-style: italic;
 }
 
+.combobox-option-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #ddd;
+  white-space: nowrap;
+}
+
+.combobox-option-check:hover {
+  background-color: #2a2a2a;
+  color: #fff;
+}
+
+.combobox-option-check input[type='checkbox'] {
+  accent-color: #646cff;
+  flex-shrink: 0;
+}
+
 

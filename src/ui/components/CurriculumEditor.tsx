@@ -5,6 +5,7 @@ import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
 import { SearchableSelect } from './SearchableSelect';
+import { eligibleTeacherOptions } from '../../shared/eligibility';
 
 interface SubgroupEntry {
   id: string;
@@ -23,8 +24,9 @@ export const CurriculumEditor = () => {
   const loadTeacherIds = [...new Set((project?.loadDistribution || []).map(l => l.teacherId))];
   const groupOptions = groups.map(g => ({ value: g.id, label: g.name }));
   const subjectOptions = subjects.map(s => ({ value: s.id, label: s.name }));
-  const teacherOptions = teachers.map(t => ({ value: t.id, label: t.name }));
   const roomOptions = rooms.map(r => ({ value: r.id, label: r.name }));
+  const teacherOptionsForSubject = (subjectId: string) =>
+    eligibleTeacherOptions(teachers, subjectId);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
@@ -227,7 +229,7 @@ export const CurriculumEditor = () => {
                     <SearchableSelect
                       value={sg.teacherId}
                       onChange={(v) => updateSubgroup(idx, 'teacherId', v)}
-                      options={teacherOptions}
+                      options={teacherOptionsForSubject(newItem.subjectId)}
                       placeholder={t('no_teacher')}
                       allowEmpty
                       pinTop={loadTeacherIds}
@@ -254,7 +256,7 @@ export const CurriculumEditor = () => {
               <SearchableSelect
                 value={newItem.teacherId}
                 onChange={(v) => setNewItem({ ...newItem, teacherId: v })}
-                options={teacherOptions}
+                options={teacherOptionsForSubject(newItem.subjectId)}
                 placeholder={t('no_teacher')}
                 allowEmpty
                 pinTop={loadTeacherIds}
@@ -332,7 +334,7 @@ export const CurriculumEditor = () => {
                   <SearchableSelect
                     value={item.teacherId || ''}
                     onChange={(v) => handleUpdate(item.id, { teacherId: v || undefined })}
-                    options={teacherOptions}
+                    options={teacherOptionsForSubject(item.subjectId)}
                     placeholder={t('none')}
                     allowEmpty
                     pinTop={loadTeacherIds}

@@ -37,6 +37,7 @@
   "short_name": "Short Name / Initials",
   "create_teacher": "Create Teacher",
   "no_teachers": "No teachers added yet. Click 'Add Teacher' to start.",
+  "no_subjects": "No subjects",
   "new_subject": "Add New Subject",
   "subject_name": "Subject Name",
   "short_code": "Short Code",
