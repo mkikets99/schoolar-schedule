@@ -16,7 +16,7 @@ import './index.css';
 
 function AppContent() {
   const { t, i18n } = useTranslation();
-  const { project, isLoading, updateGeneratedSchedule, clearGeneratedSchedule } = useProject();
+  const { project, isLoading, updateGeneratedSchedules, updateGeneratedSplits, clearGeneratedSchedule } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
   const [workerVersion, setWorkerVersion] = useState<string>('');
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
@@ -37,7 +37,8 @@ function AppContent() {
         setWorkerStatus(`${t('generating')} ${payload.progress}%`);
       } else if (type === 'RESULT') {
         setWorkerStatus(t('schedule_generated'));
-        updateGeneratedSchedule(payload);
+        updateGeneratedSchedules(payload?.schedules);
+        updateGeneratedSplits(payload?.splits);
       }
     };
 
@@ -174,7 +175,7 @@ function AppContent() {
                       <h3>{t('scheduling')}</h3>
                       <div className="stats-list">
                         <div className="stat-item">{t('curriculum_rules_count', { count: project.curriculum?.length || 0 })}</div>
-                        <div className="stat-item">{t('hours_assigned_count', { count: project.generatedSchedule?.schedule?.length || 0 })}</div>
+                        <div className="stat-item">{t('hours_assigned_count', { count: assignedLessonCount(project) })}</div>
                       </div>
                       <button onClick={() => setCurrentView('schedule')} className="card-action">{t('go_to_scheduling')}</button>
                     </div>
@@ -191,17 +192,17 @@ function AppContent() {
               {currentView === 'constraints' && <section className="editor-view"><ConstraintEditor /></section>}
               {currentView === 'schedule' && (
                 <section className="schedule-view">
-                  <div className="view-header">
-                    <h2>{t('schedule')}</h2>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <span className="legend-item"><span className="legend-dot locked-dot"></span> {t('locked')}</span>
-                      <span className="legend-item"><span className="legend-dot conflict-dot"></span> {t('conflict')}</span>
-                      {project.generatedSchedule && (
-                        <button onClick={handleClearSchedule} className="delete-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>{t('clear_schedule')}</button>
-                      )}
-                      <button onClick={handleGenerateSchedule} className="generate-btn-small">{project.generatedSchedule ? t('regenerate') : t('generate')}</button>
+                    <div className="view-header">
+                      <h2>{t('schedule')}</h2>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <span className="legend-item"><span className="legend-dot locked-dot"></span> {t('locked')}</span>
+                        <span className="legend-item"><span className="legend-dot conflict-dot"></span> {t('conflict')}</span>
+                        {hasAnySchedule(project) && (
+                          <button onClick={handleClearSchedule} className="delete-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>{t('clear_schedule')}</button>
+                        )}
+                        <button onClick={handleGenerateSchedule} className="generate-btn-small">{hasAnySchedule(project) ? t('regenerate') : t('generate')}</button>
+                      </div>
                     </div>
-                  </div>
                   <ScheduleViewer />
                 </section>
               )}
@@ -219,6 +220,22 @@ function App() {
       <AppContent />
     </ProjectProvider>
   );
+}
+
+function hasAnySchedule(project: ReturnType<typeof useProject>['project']): boolean {
+  if (!project) return false;
+  if (project.generatedSchedules) {
+    return project.generatedSchedules.semester1.schedule.length > 0 || project.generatedSchedules.semester2.schedule.length > 0;
+  }
+  return (project.generatedSchedule?.schedule?.length || 0) > 0;
+}
+
+function assignedLessonCount(project: ReturnType<typeof useProject>['project']): number {
+  if (!project) return 0;
+  if (project.generatedSchedules) {
+    return project.generatedSchedules.semester1.schedule.length + project.generatedSchedules.semester2.schedule.length;
+  }
+  return project.generatedSchedule?.schedule?.length || 0;
 }
 
 export default App;

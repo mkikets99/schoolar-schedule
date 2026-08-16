@@ -12,19 +12,33 @@ const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 export const ScheduleViewer = () => {
   const { t } = useTranslation();
   const { project } = useProject();
-  const schedule = project?.generatedSchedule?.schedule || [];
+  const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
+  const scheduleResult = project?.generatedSchedules
+    ? project.generatedSchedules[activeSemester]
+    : project?.generatedSchedule;
+  const schedule = scheduleResult?.schedule || [];
   const groups = project?.groups || [];
   const teachers = project?.teachers || [];
   const subjects = project?.subjects || [];
   const rooms = project?.rooms || [];
   const schoolName = project?.school.name || 'Schedule';
 
-  const neededHours = useMemo(() =>
-    (project?.curriculum || []).reduce((s, r) => s + r.hoursPerWeek, 0),
-    [project]);
+  const neededHours = useMemo(() => {
+    if (!project) return 0;
+    const splits = project.generatedSplits;
+    if (!splits || splits.length === 0) {
+      return project.curriculum.reduce((s, r) => s + r.hoursPerWeek, 0);
+    }
+    const splitMap = new Map(splits.map(s => [s.ruleId, s]));
+    return project.curriculum.reduce((s, r) => {
+      const split = splitMap.get(r.id);
+      if (!split) return s;
+      return s + (activeSemester === 'semester1' ? split.first : split.second);
+    }, 0);
+  }, [project, activeSemester]);
   const assignedHours = schedule.length;
   const unassignedHours = neededHours - assignedHours;
-  const score = project?.generatedSchedule?.score ?? 0;
+  const score = scheduleResult?.score ?? 0;
 
   const [filterType, setFilterType] = useState<'group' | 'teacher' | 'subject' | 'all'>('all');
   const [filterId, setFilterId] = useState<string>('');
@@ -138,7 +152,7 @@ export const ScheduleViewer = () => {
 
   const unassignedDetails = useMemo(() => {
     const perRule = new Map<string, number>();
-    for (const c of project?.generatedSchedule?.conflicts || []) {
+    for (const c of scheduleResult?.conflicts || []) {
       if (c.type === 'UNASSIGNED_HOURS' && c.ruleId) {
         perRule.set(c.ruleId, (perRule.get(c.ruleId) || 0) + (c.missing ?? 1));
       }
@@ -150,7 +164,7 @@ export const ScheduleViewer = () => {
     }
     rows.sort((a, b) => b.missing - a.missing);
     return rows;
-  }, [project]);
+  }, [project, scheduleResult]);
 
   const gapDetails = useMemo(() => {
     const rows: { groupId: string; day: string; periods: number[] }[] = [];
@@ -196,6 +210,23 @@ export const ScheduleViewer = () => {
   return (
     <div className="schedule-viewer">
       <div className="viewer-controls">
+        <div className="semester-switcher">
+          <button
+            className={activeSemester === 'semester1' ? 'active' : ''}
+            onClick={() => setActiveSemester('semester1')}
+            disabled={!project?.generatedSchedules}
+          >
+            {t('semester_1')}
+          </button>
+          <button
+            className={activeSemester === 'semester2' ? 'active' : ''}
+            onClick={() => setActiveSemester('semester2')}
+            disabled={!project?.generatedSchedules}
+          >
+            {t('semester_2')}
+          </button>
+        </div>
+
         <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
           <option value="all">{t('all')}</option>
           <option value="group">{t('view_group')}</option>

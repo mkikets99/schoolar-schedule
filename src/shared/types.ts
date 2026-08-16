@@ -94,6 +94,18 @@ export interface ScheduleResult {
   score: number;
 }
 
+export interface SemesterSplit {
+  ruleId: string;
+  hoursPerWeek: number; // annual weekly average
+  first: number; // semester 1 weekly lessons
+  second: number; // semester 2 weekly lessons
+}
+
+export interface SemesterSchedules {
+  semester1: ScheduleResult;
+  semester2: ScheduleResult;
+}
+
 export interface ProjectState {
   version: string;
   school: School;
@@ -105,7 +117,9 @@ export interface ProjectState {
   curriculum: CurriculumRule[];
   loadDistribution: LoadDistribution[];
   constraints: Constraint[];
-  generatedSchedule?: ScheduleResult;
+  generatedSchedule?: ScheduleResult; // legacy single-schedule results (older exports)
+  generatedSchedules?: SemesterSchedules;
+  generatedSplits?: SemesterSplit[];
 }
 
 export type WorkerMessageType = 

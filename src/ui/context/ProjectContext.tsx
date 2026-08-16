@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult, AcademicYear, Constraint } from '../../shared/types';
+import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult, AcademicYear, Constraint, SemesterSchedules, SemesterSplit } from '../../shared/types';
 import { storageService } from '../services/StorageService';
 
 interface ProjectContextType {
@@ -15,6 +15,8 @@ interface ProjectContextType {
   updateCurriculum: (curriculum: CurriculumRule[]) => void;
   updateLoadDistribution: (load: LoadDistribution[]) => void;
   updateConstraints: (constraints: Constraint[]) => void;
+  updateGeneratedSchedules: (result: SemesterSchedules | undefined) => void;
+  updateGeneratedSplits: (splits: SemesterSplit[] | undefined) => void;
   updateGeneratedSchedule: (result: ScheduleResult | undefined) => void;
   clearGeneratedSchedule: () => void;
   createNewProject: (name: string) => void;
@@ -107,11 +109,21 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     setProject(prev => prev ? { ...prev, constraints } : prev);
   };
 
+  const updateGeneratedSchedules = (generatedSchedules: SemesterSchedules | undefined) => {
+    setProject(prev => prev ? { ...prev, generatedSchedules } : prev);
+  };
+
+  const updateGeneratedSplits = (generatedSplits: SemesterSplit[] | undefined) => {
+    setProject(prev => prev ? { ...prev, generatedSplits } : prev);
+  };
+
   const updateGeneratedSchedule = (generatedSchedule: ScheduleResult | undefined) => {
     setProject(prev => prev ? { ...prev, generatedSchedule } : prev);
   };
 
   const clearGeneratedSchedule = () => {
+    updateGeneratedSchedules(undefined);
+    updateGeneratedSplits(undefined);
     updateGeneratedSchedule(undefined);
   };
 
@@ -129,6 +141,8 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
       updateCurriculum,
       updateLoadDistribution,
       updateConstraints,
+      updateGeneratedSchedules,
+      updateGeneratedSplits,
       updateGeneratedSchedule,
       clearGeneratedSchedule,
       createNewProject 

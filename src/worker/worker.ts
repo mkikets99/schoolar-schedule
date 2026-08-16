@@ -1,5 +1,5 @@
 import { ProjectState } from '../shared/types';
-import { generateSchedule } from './generator';
+import { generateSemesterSchedules } from './generator';
 
 self.onmessage = (event) => {
   const { type, payload } = event.data;
@@ -13,7 +13,7 @@ self.onmessage = (event) => {
       break;
 
     case 'GENERATE_SCHEDULE':
-      generateSchedule(payload as ProjectState, (msg) => self.postMessage(msg));
+      generateSemesterSchedules(payload as ProjectState, (msg) => self.postMessage(msg));
       break;
 
     default:

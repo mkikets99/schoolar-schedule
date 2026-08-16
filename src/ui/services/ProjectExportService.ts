@@ -23,7 +23,9 @@ export const exportProject = async (project: ProjectState) => {
       'curriculum.json',
       'load_distribution.json',
       'constraints.json',
-      'schedule.json'
+      'schedule.json',
+      'semester_schedules.json',
+      'semester_splits.json'
     ]
   };
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
@@ -38,8 +40,15 @@ export const exportProject = async (project: ProjectState) => {
   zip.file('load_distribution.json', JSON.stringify(project.loadDistribution, null, 2));
   zip.file('constraints.json', JSON.stringify(project.constraints, null, 2));
   
-  if (project.generatedSchedule) {
+  if (project.generatedSchedules) {
+    zip.file('semester_schedules.json', JSON.stringify(project.generatedSchedules, null, 2));
+    zip.file('schedule.json', JSON.stringify(project.generatedSchedules.semester1, null, 2));
+  } else if (project.generatedSchedule) {
     zip.file('schedule.json', JSON.stringify(project.generatedSchedule, null, 2));
+  }
+
+  if (project.generatedSplits && project.generatedSplits.length > 0) {
+    zip.file('semester_splits.json', JSON.stringify(project.generatedSplits, null, 2));
   }
 
   const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
@@ -91,7 +100,9 @@ export const importProject = async (file: File): Promise<ProjectState> => {
       curriculum: await readJson('curriculum.json'),
       loadDistribution: await readJson('load_distribution.json'),
       constraints: await readJson('constraints.json'),
-      generatedSchedule: await readJson('schedule.json', null)
+      generatedSchedule: await readJson('schedule.json', null),
+      generatedSchedules: await readJson('semester_schedules.json', undefined),
+      generatedSplits: await readJson('semester_splits.json', undefined)
     };
 
     
@@ -100,6 +111,18 @@ export const importProject = async (file: File): Promise<ProjectState> => {
       if (!Array.isArray(project.generatedSchedule.schedule)) project.generatedSchedule.schedule = [];
       if (!Array.isArray(project.generatedSchedule.conflicts)) project.generatedSchedule.conflicts = [];
       if (typeof project.generatedSchedule.score !== 'number') project.generatedSchedule.score = 0;
+    }
+
+    if (project.generatedSchedules && !Array.isArray(project.generatedSchedules)) {
+      for (const semester of ['semester1', 'semester2'] as const) {
+        const result = project.generatedSchedules[semester];
+        if (!result || !Array.isArray(result.schedule)) {
+          project.generatedSchedules[semester] = { schedule: [], conflicts: [], score: 0 };
+        } else {
+          if (!Array.isArray(result.conflicts)) result.conflicts = [];
+          if (typeof result.score !== 'number') result.score = 0;
+        }
+      }
     }
     
     return project;

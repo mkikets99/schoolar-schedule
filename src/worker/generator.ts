@@ -1,4 +1,4 @@
-import { ProjectState, CurriculumRule, WorkerMessage } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules } from '../shared/types';
 
 interface LessonStub {
   id: string;
@@ -22,6 +22,11 @@ interface GroupScheduleConfig {
 }
 
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
+  const result = await runGenerate(project, emit);
+  emit({ type: 'RESULT', payload: result });
+}
+
+async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const allRooms = project.rooms || [];
 
@@ -392,14 +397,92 @@ export async function generateSchedule(project: ProjectState, emit: (msg: Worker
   await sleep(200);
 
   const totalBatches = units.length;
-  emit({
-    type: 'RESULT',
-    payload: {
-      schedule,
-      conflicts,
-      score: totalBatches > 0 ? unitsAssigned / totalBatches : 0,
-    },
-  });
+  return {
+    schedule,
+    conflicts,
+    score: totalBatches > 0 ? unitsAssigned / totalBatches : 0,
+  };
+}
+
+export function computeSemesterSplits(project: ProjectState): SemesterSplit[] {
+  const teacherLoad = new Map<string, { s1: number; s2: number }>();
+  const getLoad = (teacherId: string) => {
+    if (!teacherLoad.has(teacherId)) teacherLoad.set(teacherId, { s1: 0, s2: 0 });
+    return teacherLoad.get(teacherId)!;
+  };
+
+  const splits: SemesterSplit[] = [];
+  const fractionalByTeacher = new Map<string, CurriculumRule[]>();
+
+  for (const rule of project.curriculum) {
+    if (Number.isInteger(rule.hoursPerWeek)) {
+      const h = rule.hoursPerWeek;
+      splits.push({ ruleId: rule.id, hoursPerWeek: h, first: h, second: h });
+      if (rule.teacherId) {
+        const load = getLoad(rule.teacherId);
+        load.s1 += h;
+        load.s2 += h;
+      }
+    } else {
+      const teacherId = rule.teacherId || '';
+      if (!fractionalByTeacher.has(teacherId)) fractionalByTeacher.set(teacherId, []);
+      fractionalByTeacher.get(teacherId)!.push(rule);
+    }
+  }
+
+  for (const [teacherId, rules] of fractionalByTeacher) {
+    rules.sort((a, b) => b.hoursPerWeek - a.hoursPerWeek);
+    for (const rule of rules) {
+      const ceil = Math.ceil(rule.hoursPerWeek);
+      const floor = Math.floor(rule.hoursPerWeek);
+      const load = getLoad(teacherId);
+      const first = load.s1 <= load.s2 ? ceil : floor;
+      const second = first === ceil ? floor : ceil;
+      load.s1 += first;
+      load.s2 += second;
+      splits.push({ ruleId: rule.id, hoursPerWeek: rule.hoursPerWeek, first, second });
+    }
+  }
+
+  return splits;
+}
+
+export function buildSemesterProject(
+  project: ProjectState,
+  semester: 1 | 2,
+  splits: SemesterSplit[]
+): ProjectState {
+  const splitMap = new Map(splits.map((s) => [s.ruleId, s]));
+  const curriculum = project.curriculum
+    .map((rule) => {
+      const split = splitMap.get(rule.id);
+      const hours = split ? (semester === 1 ? split.first : split.second) : rule.hoursPerWeek;
+      if (hours <= 0) return null;
+      return { ...rule, hoursPerWeek: hours };
+    })
+    .filter((rule): rule is CurriculumRule => rule !== null);
+  return { ...project, curriculum };
+}
+
+export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void) {
+  const splits = computeSemesterSplits(project);
+
+  const runScaled = async (semesterProject: ProjectState, from: number, to: number) => {
+    return runGenerate(semesterProject, (msg) => {
+      if (msg.type === 'PROGRESS') {
+        const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
+        emit({ type: 'PROGRESS', payload: { progress: from + Math.floor((p / 100) * (to - from)) } });
+      }
+    });
+  };
+
+  const semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
+  emit({ type: 'PROGRESS', payload: { progress: 50 } });
+  const semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+  emit({ type: 'PROGRESS', payload: { progress: 100 } });
+
+  const schedules: SemesterSchedules = { semester1, semester2 };
+  emit({ type: 'RESULT', payload: { schedules, splits } });
 }
 
 function sleep(ms: number) {

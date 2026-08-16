@@ -73,6 +73,8 @@
   "generating": "Генерація:",
   "schedule_generated": "Розклад згенеровано",
   "starting_gen": "Початок генерації...",
+  "semester_1": "І семестр",
+  "semester_2": "ІІ семестр",
   "confirm_reset": "Ви дійсно бажаєте видалити поточний проект?",
   "confirm_delete_teacher": "Видалити цього вчителя?",
   "confirm_delete_subject": "Видалити цей предмет?",
