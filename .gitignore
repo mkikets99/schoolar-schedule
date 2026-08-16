@@ -27,3 +27,6 @@ GEMINI.md
 src/locales/*
 !src/locales/en
 !src/locales/en/translation.json
+
+# Test data / sample school files
+*.schoolproj

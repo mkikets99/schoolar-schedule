@@ -299,6 +299,10 @@ async function generateTestSchedule(project: ProjectState) {
     const first = unit.lessons[0];
     if (groupBusy.has(`${first.groupId}-${day}-${period}`)) return false;
 
+    const counts = dailyCounts.get(unit.groupId);
+    const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
+    if (counts && counts[days.indexOf(day)] + unit.lessons.length > maxDaily) return false;
+
     for (const lesson of unit.lessons) {
       if (!canPlace(lesson, day, period, true)) return false;
     }
@@ -326,7 +330,8 @@ async function generateTestSchedule(project: ProjectState) {
     const maxDaily = cfg?.maxDaily ?? 8;
 
     const dayScores = days.map((day, di) => {
-      const fits = unit.type === 'double' ? counts[di] + 2 <= maxDaily : true;
+      const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
+      const fits = counts[di] + extra <= maxDaily;
       return {
         day, index: di,
         need: counts[di] >= maxDaily || !fits ? -999 : targets[di] - counts[di],
@@ -349,8 +354,9 @@ async function generateTestSchedule(project: ProjectState) {
       for (const day of days) {
         if (placed) break;
         const di = days.indexOf(day);
+        const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
         if (counts[di] >= maxDaily) continue;
-        if (unit.type === 'double' && counts[di] + 2 > maxDaily) continue;
+        if (counts[di] + extra > maxDaily) continue;
         const ordered = getPeriodsForGroup(unit.groupId);
         for (const p of ordered) {
           if (tryPlaceUnit(unit, day, p)) { placed = true; break; }
