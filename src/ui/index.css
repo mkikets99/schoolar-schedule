@@ -1781,6 +1781,14 @@ tr.split-group + tr.split-group td {
 
 .combobox-option-check input[type='checkbox'] {
   accent-color: #646cff;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
   flex-shrink: 0;
 }
 
