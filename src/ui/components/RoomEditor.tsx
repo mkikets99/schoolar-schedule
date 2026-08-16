@@ -5,6 +5,7 @@ import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
+import { SearchableSelect } from './SearchableSelect';
 
 export const RoomEditor = () => {
   const { t } = useTranslation();
@@ -119,10 +120,14 @@ export const RoomEditor = () => {
 
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
-        <select className="table-filter" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-          <option value="">{t('all_types')}</option>
-          {roomTypes.map(type => <option key={type} value={type}>{type}</option>)}
-        </select>
+        <SearchableSelect
+          className="table-filter"
+          value={typeFilter}
+          onChange={setTypeFilter}
+          options={roomTypes.map(type => ({ value: type, label: type }))}
+          placeholder={t('all_types')}
+          allowEmpty
+        />
         <span className="table-count">{t('showing_count', { shown, total })}</span>
       </div>
 

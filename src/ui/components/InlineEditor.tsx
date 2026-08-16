@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CurriculumRule, Lesson, ProjectState, ScheduleResult } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
+import { SearchableSelect } from './SearchableSelect';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -247,13 +248,12 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     <div className="inline-editor">
       <div className="inline-editor-toolbar">
         <label className="editor-class-label">{t('group')}:</label>
-        <select
+        <SearchableSelect
           className="table-filter"
           value={selectedGroupId}
-          onChange={(e) => setSelectedGroupId(e.target.value)}
-        >
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
+          onChange={setSelectedGroupId}
+          options={groups.map(g => ({ value: g.id, label: g.name }))}
+        />
         <button className="export-btn" onClick={undo} disabled={historyRef.current.length === 0}>{t('editor_undo')}</button>
         <button className="export-btn" onClick={handleApply}>{t('editor_apply')}</button>
         <button className="export-btn" onClick={handleReset}>{t('editor_reset')}</button>

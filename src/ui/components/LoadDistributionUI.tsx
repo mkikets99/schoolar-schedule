@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useProject } from '../context/ProjectContext';
 import { LoadDistribution } from '../../shared/types';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
+import { SearchableSelect } from './SearchableSelect';
 
 export const LoadDistributionUI = () => {
   const { t } = useTranslation();
@@ -11,6 +12,7 @@ export const LoadDistributionUI = () => {
   const groups = project?.groups || [];
   const curriculum = project?.curriculum || [];
   const load = project?.loadDistribution || [];
+  const loadTeacherIds = [...new Set(load.map(l => l.teacherId))];
 
   const [isDraft, setIsDraft] = useState(true);
   const [groupFilter, setGroupFilter] = useState('');
@@ -116,14 +118,23 @@ export const LoadDistributionUI = () => {
 
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
-        <select className="table-filter" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
-          <option value="">{t('all_groups')}</option>
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <select className="table-filter" value={teacherFilter} onChange={(e) => setTeacherFilter(e.target.value)}>
-          <option value="">{t('all_teachers')}</option>
-          {teachers.map(tchr => <option key={tchr.id} value={tchr.id}>{tchr.name}</option>)}
-        </select>
+        <SearchableSelect
+          className="table-filter"
+          value={groupFilter}
+          onChange={setGroupFilter}
+          options={groups.map(g => ({ value: g.id, label: g.name }))}
+          placeholder={t('all_groups')}
+          allowEmpty
+        />
+        <SearchableSelect
+          className="table-filter"
+          value={teacherFilter}
+          onChange={setTeacherFilter}
+          options={teachers.map(tchr => ({ value: tchr.id, label: tchr.name }))}
+          placeholder={t('all_teachers')}
+          allowEmpty
+          pinTop={loadTeacherIds}
+        />
         <label className="table-toggle">
           <input type="checkbox" checked={unassignedOnly} onChange={(e) => setUnassignedOnly(e.target.checked)} />
           {t('unassigned_only')}
@@ -147,16 +158,15 @@ export const LoadDistributionUI = () => {
               <td>{getSubjectName(rule.subjectId)}</td>
               <td>{rule.hoursPerWeek}</td>
               <td>
-                <select 
-                  value={rule.teacherId || ''} 
-                  onChange={(e) => handleAssignTeacher(rule.id, e.target.value || undefined)}
+                <SearchableSelect
+                  value={rule.teacherId || ''}
+                  onChange={(v) => handleAssignTeacher(rule.id, v || undefined)}
+                  options={teachers.map(tchr => ({ value: tchr.id, label: tchr.name }))}
+                  placeholder={t('unassigned')}
+                  allowEmpty
                   disabled={!isDraft}
-                >
-                  <option value="">{t('unassigned')}</option>
-                  {teachers.map(tchr => (
-                    <option key={tchr.id} value={tchr.id}>{tchr.name}</option>
-                  ))}
-                </select>
+                  pinTop={loadTeacherIds}
+                />
               </td>
             </tr>
           ))}

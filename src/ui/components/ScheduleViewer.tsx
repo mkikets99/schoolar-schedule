@@ -5,6 +5,7 @@ import { ExportModal } from './ExportModal';
 import { ExportContext } from '../services/ExportService';
 import { Modal } from './Modal';
 import { InlineEditor } from './InlineEditor';
+import { SearchableSelect } from './SearchableSelect';
 import { CurriculumRule, ScheduleResult } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -23,6 +24,7 @@ export const ScheduleViewer = () => {
   const teachers = project?.teachers || [];
   const subjects = project?.subjects || [];
   const rooms = project?.rooms || [];
+  const loadTeacherIds = [...new Set((project?.loadDistribution || []).map(l => l.teacherId))];
   const schoolName = project?.school.name || 'Schedule';
 
   const neededHours = useMemo(() => {
@@ -253,15 +255,18 @@ export const ScheduleViewer = () => {
             </select>
 
             {filterType !== 'all' && (
-              <select value={filterId} onChange={(e) => setFilterId(e.target.value)}>
-                <option value="">{t('select_view', { type: filterType })}</option>
-                {filterType === 'group'
-                  ? groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)
+              <SearchableSelect
+                value={filterId}
+                onChange={setFilterId}
+                options={filterType === 'group'
+                  ? groups.map(g => ({ value: g.id, label: g.name }))
                   : filterType === 'teacher'
-                  ? teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
-                  : subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
-                }
-              </select>
+                  ? teachers.map(t => ({ value: t.id, label: t.name }))
+                  : subjects.map(s => ({ value: s.id, label: s.name }))}
+                placeholder={t('select_view', { type: filterType })}
+                allowEmpty
+                pinTop={filterType === 'teacher' ? loadTeacherIds : []}
+              />
             )}
 
             {filterType === 'all' && (

@@ -151,7 +151,11 @@ describe('InlineEditor', () => {
 
   it('switching the class selector shows that class lessons', () => {
     const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
-    fireEvent.change(container.querySelector('.inline-editor-toolbar select')!, { target: { value: 'g2' } });
+    fireEvent.click(container.querySelector('.inline-editor-toolbar .combobox-trigger')!);
+    const option = Array.from(container.querySelectorAll('.combobox-option')).find(
+      el => el.getAttribute('data-value') === 'g2'
+    )!;
+    fireEvent.click(option);
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-B');
   });

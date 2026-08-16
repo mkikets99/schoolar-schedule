@@ -4,6 +4,7 @@ import { CurriculumRule } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
+import { SearchableSelect } from './SearchableSelect';
 
 interface SubgroupEntry {
   id: string;
@@ -19,6 +20,11 @@ export const CurriculumEditor = () => {
   const subjects = project?.subjects || [];
   const teachers = project?.teachers || [];
   const rooms = project?.rooms || [];
+  const loadTeacherIds = [...new Set((project?.loadDistribution || []).map(l => l.teacherId))];
+  const groupOptions = groups.map(g => ({ value: g.id, label: g.name }));
+  const subjectOptions = subjects.map(s => ({ value: s.id, label: s.name }));
+  const teacherOptions = teachers.map(t => ({ value: t.id, label: t.name }));
+  const roomOptions = rooms.map(r => ({ value: r.id, label: r.name }));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState('');
@@ -161,16 +167,22 @@ export const CurriculumEditor = () => {
         }
       >
         <FormField label={t('target_group')}>
-          <select value={newItem.groupId} onChange={(e) => setNewItem({ ...newItem, groupId: e.target.value })}>
-            <option value="">{t('select_group')}</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={newItem.groupId}
+            onChange={(v) => setNewItem({ ...newItem, groupId: v })}
+            options={groupOptions}
+            placeholder={t('select_group')}
+            allowEmpty
+          />
         </FormField>
         <FormField label={t('subject')}>
-          <select value={newItem.subjectId} onChange={(e) => setNewItem({ ...newItem, subjectId: e.target.value })}>
-            <option value="">{t('select_subject')}</option>
-            {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={newItem.subjectId}
+            onChange={(v) => setNewItem({ ...newItem, subjectId: v })}
+            options={subjectOptions}
+            placeholder={t('select_subject')}
+            allowEmpty
+          />
         </FormField>
         <FormField label={t('hours_per_week')}>
           <input
@@ -212,16 +224,23 @@ export const CurriculumEditor = () => {
                 <div key={sg.id} className="subgroup-card">
                   <h4 className="subgroup-title">{t('subgroup_n', { n: idx + 1 })}</h4>
                   <FormField label={t('assign_teacher')}>
-                    <select value={sg.teacherId} onChange={(e) => updateSubgroup(idx, 'teacherId', e.target.value)}>
-                      <option value="">{t('no_teacher')}</option>
-                      {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={sg.teacherId}
+                      onChange={(v) => updateSubgroup(idx, 'teacherId', v)}
+                      options={teacherOptions}
+                      placeholder={t('no_teacher')}
+                      allowEmpty
+                      pinTop={loadTeacherIds}
+                    />
                   </FormField>
                   <FormField label={t('preferred_room')}>
-                    <select value={sg.roomId} onChange={(e) => updateSubgroup(idx, 'roomId', e.target.value)}>
-                      <option value="">{t('no_room')}</option>
-                      {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={sg.roomId}
+                      onChange={(v) => updateSubgroup(idx, 'roomId', v)}
+                      options={roomOptions}
+                      placeholder={t('no_room')}
+                      allowEmpty
+                    />
                   </FormField>
                 </div>
               ))}
@@ -232,16 +251,23 @@ export const CurriculumEditor = () => {
         {!splitMode && (
           <>
             <FormField label={t('assign_teacher')}>
-              <select value={newItem.teacherId} onChange={(e) => setNewItem({ ...newItem, teacherId: e.target.value })}>
-                <option value="">{t('no_teacher')}</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <SearchableSelect
+                value={newItem.teacherId}
+                onChange={(v) => setNewItem({ ...newItem, teacherId: v })}
+                options={teacherOptions}
+                placeholder={t('no_teacher')}
+                allowEmpty
+                pinTop={loadTeacherIds}
+              />
             </FormField>
             <FormField label={t('preferred_room')}>
-              <select value={newItem.roomId} onChange={(e) => setNewItem({ ...newItem, roomId: e.target.value })}>
-                <option value="">{t('no_room')}</option>
-                {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
+              <SearchableSelect
+                value={newItem.roomId}
+                onChange={(v) => setNewItem({ ...newItem, roomId: v })}
+                options={roomOptions}
+                placeholder={t('no_room')}
+                allowEmpty
+              />
             </FormField>
           </>
         )}
@@ -249,14 +275,22 @@ export const CurriculumEditor = () => {
 
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
-        <select className="table-filter" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
-          <option value="">{t('all_groups')}</option>
-          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-        <select className="table-filter" value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}>
-          <option value="">{t('all_subjects')}</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <SearchableSelect
+          className="table-filter"
+          value={groupFilter}
+          onChange={setGroupFilter}
+          options={groupOptions}
+          placeholder={t('all_groups')}
+          allowEmpty
+        />
+        <SearchableSelect
+          className="table-filter"
+          value={subjectFilter}
+          onChange={setSubjectFilter}
+          options={subjectOptions}
+          placeholder={t('all_subjects')}
+          allowEmpty
+        />
         <label className="table-toggle">
           <input type="checkbox" checked={splitsOnly} onChange={(e) => setSplitsOnly(e.target.checked)} />
           {t('splits_only')}
@@ -295,22 +329,23 @@ export const CurriculumEditor = () => {
                   />
                 </td>
                 <td>
-                  <select
+                  <SearchableSelect
                     value={item.teacherId || ''}
-                    onChange={(e) => handleUpdate(item.id, { teacherId: e.target.value || undefined })}
-                  >
-                    <option value="">{t('none')}</option>
-                    {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                    onChange={(v) => handleUpdate(item.id, { teacherId: v || undefined })}
+                    options={teacherOptions}
+                    placeholder={t('none')}
+                    allowEmpty
+                    pinTop={loadTeacherIds}
+                  />
                 </td>
                 <td>
-                  <select
+                  <SearchableSelect
                     value={item.roomId || ''}
-                    onChange={(e) => handleUpdate(item.id, { roomId: e.target.value || undefined })}
-                  >
-                    <option value="">{t('none')}</option>
-                    {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
+                    onChange={(v) => handleUpdate(item.id, { roomId: v || undefined })}
+                    options={roomOptions}
+                    placeholder={t('none')}
+                    allowEmpty
+                  />
                 </td>
                 <td style={{ textAlign: 'center' }}>
                   {dup && <span className="split-badge">{t('split')}</span>}

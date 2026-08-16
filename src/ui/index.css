@@ -1649,4 +1649,118 @@ tr.split-group + tr.split-group td {
   padding: 0.5rem 0;
 }
 
+/* Searchable combobox */
+.combobox {
+  position: relative;
+  width: 100%;
+  min-width: 140px;
+}
+
+.combobox-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background-color: #2a2a2a;
+  color: #fff;
+  border: 1px solid #444;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.combobox-trigger.placeholder {
+  color: #777;
+}
+
+.combobox-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.combobox-trigger:focus {
+  outline: none;
+  border-color: #646cff;
+  box-shadow: 0 0 0 2px rgba(100, 108, 255, 0.2);
+}
+
+.combobox-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combobox-caret {
+  flex-shrink: 0;
+  color: #888;
+  font-size: 0.7rem;
+}
+
+.combobox-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  background-color: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.combobox-search {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background-color: #2a2a2a;
+  border: none;
+  border-bottom: 1px solid #444;
+  color: #fff;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.combobox-list {
+  overflow-y: auto;
+  max-height: 240px;
+}
+
+.combobox-option {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #ddd;
+  border: none;
+  background: none;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.combobox-option:hover,
+.combobox-option.highlighted {
+  background-color: #2a2a2a;
+  color: #fff;
+}
+
+.combobox-option.selected {
+  color: #646cff;
+  font-weight: 600;
+}
+
+.combobox-no-results {
+  padding: 0.5rem 0.75rem;
+  color: #666;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
 

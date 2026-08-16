@@ -5,6 +5,7 @@ import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { ImportWizard } from './ImportWizard';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
+import { SearchableSelect } from './SearchableSelect';
 
 export const TeacherEditor = () => {
   const { t } = useTranslation();
@@ -123,10 +124,14 @@ export const TeacherEditor = () => {
 
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
-        <select className="table-filter" value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}>
-          <option value="">{t('all_subjects')}</option>
-          {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <SearchableSelect
+          className="table-filter"
+          value={subjectFilter}
+          onChange={setSubjectFilter}
+          options={subjects.map(s => ({ value: s.id, label: s.name }))}
+          placeholder={t('all_subjects')}
+          allowEmpty
+        />
         <span className="table-count">{t('showing_count', { shown, total })}</span>
       </div>
 

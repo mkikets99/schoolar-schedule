@@ -4,6 +4,7 @@ import { Constraint, ConstraintKind } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
+import { SearchableSelect } from './SearchableSelect';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -20,6 +21,7 @@ export const ConstraintEditor = () => {
   const teachers = project?.teachers || [];
   const subjects = project?.subjects || [];
   const groups = project?.groups || [];
+  const loadTeacherIds = [...new Set((project?.loadDistribution || []).map(l => l.teacherId))];
 
   const [busyOpen, setBusyOpen] = useState(false);
   const [firstOpen, setFirstOpen] = useState(false);
@@ -139,10 +141,14 @@ export const ConstraintEditor = () => {
         }
       >
         <FormField label={t('teacher')}>
-          <select value={busyTeacherId} onChange={(e) => setBusyTeacherId(e.target.value)}>
-            <option value="">{t('select_teacher')}</option>
-            {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={busyTeacherId}
+            onChange={setBusyTeacherId}
+            options={teachers.map(t => ({ value: t.id, label: t.name }))}
+            placeholder={t('select_teacher')}
+            allowEmpty
+            pinTop={loadTeacherIds}
+          />
         </FormField>
         <FormField label={t('day')}>
           <select value={busyDay} onChange={(e) => setBusyDay(e.target.value)}>
@@ -177,16 +183,22 @@ export const ConstraintEditor = () => {
         }
       >
         <FormField label={t('subject')}>
-          <select value={firstSubjectId} onChange={(e) => setFirstSubjectId(e.target.value)}>
-            <option value="">{t('select_subject')}</option>
-            {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={firstSubjectId}
+            onChange={setFirstSubjectId}
+            options={subjects.map(s => ({ value: s.id, label: s.name }))}
+            placeholder={t('select_subject')}
+            allowEmpty
+          />
         </FormField>
         <FormField label={t('group')}>
-          <select value={firstGroupId} onChange={(e) => setFirstGroupId(e.target.value)}>
-            <option value="">{t('all_groups')}</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={firstGroupId}
+            onChange={setFirstGroupId}
+            options={groups.map(g => ({ value: g.id, label: g.name }))}
+            placeholder={t('all_groups')}
+            allowEmpty
+          />
         </FormField>
       </Modal>
 
