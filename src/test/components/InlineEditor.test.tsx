@@ -32,6 +32,33 @@ const makeProject = (): ProjectState => ({
   },
 });
 
+const makeTwoGroupProject = (): ProjectState => ({
+  version: '1.0.0',
+  school: { id: 's1', name: 'Test School' },
+  academicYears: [],
+  teachers: [{ id: 't1', name: 'Anna', subjects: ['subj1'] }],
+  subjects: [{ id: 'subj1', name: 'Math', shortName: 'M' }],
+  rooms: [{ id: 'r1', name: 'Room 1', types: [] }],
+  groups: [
+    { id: 'g1', name: '5-A', grade: 5, subgroups: [] },
+    { id: 'g2', name: '5-B', grade: 5, subgroups: [] },
+  ],
+  curriculum: [
+    { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+    { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+  ],
+  loadDistribution: [],
+  constraints: [],
+  generatedSchedule: {
+    schedule: [
+      { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+      { id: 'l2', ruleId: 'c2', groupId: 'g2', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+    ],
+    conflicts: [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 }, { type: 'UNASSIGNED_HOURS', ruleId: 'c2', missing: 1 }],
+    score: 0.5,
+  },
+});
+
 describe('InlineEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -83,5 +110,27 @@ describe('InlineEditor', () => {
     const result = onSave.mock.calls[0][0];
     expect(result.schedule.length).toBe(0);
     expect(result.conflicts).toContainEqual({ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 2 });
+  });
+
+  it('shows only the selected class lessons on the timeline and pool', () => {
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A');
+  });
+
+  it('switching the class selector shows that class lessons', () => {
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    fireEvent.change(container.querySelector('.inline-editor-toolbar select')!, { target: { value: 'g2' } });
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-B');
+  });
+
+  it('still flags conflicts with another class sharing teacher and room', () => {
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    const lesson = container.querySelector('.timeline-lesson')!;
+    expect(lesson.className).toContain('conflict');
+    expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_teacher_slot');
+    expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_room_slot');
   });
 });

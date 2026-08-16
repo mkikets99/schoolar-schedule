@@ -251,7 +251,7 @@
   "editor_remove": "Remove from schedule",
   "editor_assigned_count": "{{assigned}} / {{needed}} placed",
   "editor_checker_hint": "Drag lessons here to remove them from the schedule",
-  "editor_hint": "Drag lessons between days, periods and the unassigned area. Conflicts are highlighted red.",
+  "editor_hint": "Select a class, then drag its lessons between days, periods and the unassigned area. Conflicts with other classes are highlighted red.",
   "conflict_teacher_slot": "Teacher already has another lesson at this time",
   "conflict_group_slot": "Group already has a different lesson at this time",
   "conflict_room_slot": "Room is occupied at this time",

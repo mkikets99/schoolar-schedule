@@ -23,6 +23,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   const [gridLessons, setGridLessons] = useState<Lesson[]>([]);
   const [poolLessons, setPoolLessons] = useState<Lesson[]>([]);
   const [hover, setHover] = useState<{ day: string; period: number } | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(project.groups[0]?.id || '');
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
 
@@ -118,15 +119,28 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     [gridLessons, poolLessons, project]
   );
 
+  const visibleGrid = useMemo(
+    () => gridLessons.filter(l => l.groupId === selectedGroupId),
+    [gridLessons, selectedGroupId]
+  );
+  const visiblePool = useMemo(
+    () => poolLessons.filter(l => l.groupId === selectedGroupId),
+    [poolLessons, selectedGroupId]
+  );
+  const visibleConflictCount = useMemo(
+    () => visibleGrid.filter(l => (analysis.byLesson.get(l.id) || []).length > 0).length,
+    [visibleGrid, analysis]
+  );
+
   const lessonsBySlot = useMemo(() => {
     const map = new Map<string, Lesson[]>();
-    for (const lesson of gridLessons) {
+    for (const lesson of visibleGrid) {
       const key = `${lesson.day}|${lesson.period}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(lesson);
     }
     return map;
-  }, [gridLessons]);
+  }, [visibleGrid]);
 
   const handleDragStart = (e: DragEvent, id: string) => {
     dragRef.current = id;
@@ -206,14 +220,22 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   return (
     <div className="inline-editor">
       <div className="inline-editor-toolbar">
+        <label className="editor-class-label">{t('group')}:</label>
+        <select
+          className="table-filter"
+          value={selectedGroupId}
+          onChange={(e) => setSelectedGroupId(e.target.value)}
+        >
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
         <button className="export-btn" onClick={undo} disabled={historyRef.current.length === 0}>{t('editor_undo')}</button>
         <button className="export-btn" onClick={handleApply}>{t('editor_apply')}</button>
         <button className="export-btn" onClick={handleReset}>{t('editor_reset')}</button>
         <span className="summary-badge">
-          {t('editor_assigned_count', { assigned: analysis.assignedCount, needed: analysis.neededCount })}
+          {t('editor_assigned_count', { assigned: visibleGrid.length, needed: visibleGrid.length + visiblePool.length })}
         </span>
-        <span className={`summary-badge ${analysis.conflictCount > 0 ? 'conflict-count' : ''}`}>
-          {analysis.conflictCount} {t('conflicts').toLowerCase()}
+        <span className={`summary-badge ${visibleConflictCount > 0 ? 'conflict-count' : ''}`}>
+          {visibleConflictCount} {t('conflicts').toLowerCase()}
         </span>
       </div>
 
@@ -262,13 +284,15 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
         </div>
 
         <div className="checker-zone" onDragOver={(e) => e.preventDefault()} onDrop={handlePoolDrop}>
-          <h4 className="checker-zone-title">{t('editor_unassigned')} ({poolLessons.length})</h4>
+          <h4 className="checker-zone-title">
+            {t('editor_unassigned')} — {getGroupName(selectedGroupId)} ({visiblePool.length})
+          </h4>
           <p className="checker-zone-hint">{t('editor_checker_hint')}</p>
-          {poolLessons.length === 0 ? (
+          {visiblePool.length === 0 ? (
             <div className="checker-empty">{t('no_unassigned')}</div>
           ) : (
             <div className="checker-list">
-              {poolLessons.map(lesson => {
+              {visiblePool.map(lesson => {
                 const subject = getSubject(lesson.subjectId);
                 return (
                   <div

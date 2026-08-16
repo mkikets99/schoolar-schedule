@@ -1408,6 +1408,13 @@ tr.split-group + tr.split-group td {
   cursor: not-allowed;
 }
 
+.editor-class-label {
+  font-size: 0.85rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .editor-hint {
   font-size: 0.8rem;
   color: #666;
