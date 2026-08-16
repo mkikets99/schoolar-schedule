@@ -102,7 +102,9 @@ export const LoadDistributionUI = () => {
           <h3>{t('unassigned')}</h3>
           <div className="stat-value" style={{ fontSize: '1.5rem', color: unassignedCount > 0 ? '#ff4d4d' : '#4CAF50' }}>{unassignedCount}</div>
         </div>
-        {teachers.map(tchr => (
+        {[...teachers]
+          .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
+          .map(tchr => (
           <div
             key={tchr.id}
             className={`teacher-card clickable ${teacherFilter === tchr.id ? 'active' : ''}`}
