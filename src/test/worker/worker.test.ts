@@ -61,6 +61,10 @@ async function generateTestSchedule(project: ProjectState) {
     lessons: LessonStub[];
   }
 
+  function unitSlotCount(unit: SchedulingUnit): number {
+    return unit.type === 'double' ? 2 : 1;
+  }
+
   const units: SchedulingUnit[] = [];
   for (const [key, rules] of seen) {
     const [groupId] = key.split('|');
@@ -134,7 +138,7 @@ async function generateTestSchedule(project: ProjectState) {
 
   const groupLessonTotals = new Map<string, number>();
   for (const unit of units) {
-    groupLessonTotals.set(unit.groupId, (groupLessonTotals.get(unit.groupId) || 0) + unit.lessons.length);
+    groupLessonTotals.set(unit.groupId, (groupLessonTotals.get(unit.groupId) || 0) + unitSlotCount(unit));
   }
 
   const dailyTargets = new Map<string, number[]>();
@@ -239,12 +243,14 @@ async function generateTestSchedule(project: ProjectState) {
       period,
     });
 
-    groupBusy.add(`${lesson.groupId}-${slotKey}`);
+    const groupSlotKey = `${lesson.groupId}-${slotKey}`;
+    const firstInSlot = !groupBusy.has(groupSlotKey);
+    groupBusy.add(groupSlotKey);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
     roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
-    if (di >= 0) {
+    if (di >= 0 && firstInSlot) {
       const counts = dailyCounts.get(lesson.groupId);
       if (counts) counts[di]++;
     }
@@ -301,7 +307,7 @@ async function generateTestSchedule(project: ProjectState) {
 
     const counts = dailyCounts.get(unit.groupId);
     const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
-    if (counts && counts[days.indexOf(day)] + unit.lessons.length > maxDaily) return false;
+    if (counts && counts[days.indexOf(day)] + unitSlotCount(unit) > maxDaily) return false;
 
     for (const lesson of unit.lessons) {
       if (!canPlace(lesson, day, period, true)) return false;
@@ -330,7 +336,7 @@ async function generateTestSchedule(project: ProjectState) {
     const maxDaily = cfg?.maxDaily ?? 8;
 
     const dayScores = days.map((day, di) => {
-      const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
+      const extra = unitSlotCount(unit);
       const fits = counts[di] + extra <= maxDaily;
       return {
         day, index: di,
@@ -354,7 +360,7 @@ async function generateTestSchedule(project: ProjectState) {
       for (const day of days) {
         if (placed) break;
         const di = days.indexOf(day);
-        const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
+        const extra = unitSlotCount(unit);
         if (counts[di] >= maxDaily) continue;
         if (counts[di] + extra > maxDaily) continue;
         const ordered = getPeriodsForGroup(unit.groupId);
@@ -498,6 +504,32 @@ describe('Worker scheduling algorithm', () => {
     }
 
     expect(result.conflicts).toHaveLength(0);
+  });
+
+  it('counts a split lesson as 1 toward the group daily maximum', async () => {
+    const project = makeProject({
+      teachers: [
+        { id: 't1', name: 'Teacher A', subjects: ['subj-info'] },
+        { id: 't2', name: 'Teacher B', subjects: ['subj-info'] },
+        { id: 't3', name: 'Teacher C', subjects: ['subj-math'] },
+      ],
+      groups: [{ id: 'g1', name: '10-A', grade: 10, subgroups: [], maxDailyLessons: 1 }],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 1, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 1, teacherId: 't2', roomId: 'r2' },
+        { id: 'c3', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 1, teacherId: 't3', roomId: 'r3' },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.schedule).toHaveLength(3);
+
+    const splitLessons = result.schedule.filter((l) => l.subjectId === 'subj-info');
+    expect(splitLessons.length).toBe(2);
+    expect(splitLessons[0].day).toBe(splitLessons[1].day);
+    expect(splitLessons[0].period).toBe(splitLessons[1].period);
   });
 
   it('places double lessons in consecutive periods when doubleLesson is set', async () => {

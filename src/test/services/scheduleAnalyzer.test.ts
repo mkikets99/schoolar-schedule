@@ -128,6 +128,43 @@ describe('analyzeSchedule', () => {
     expect(a.byLesson.get('l4')).toContain(CONFLICT_REASON.DAILY_OVERLOAD);
   });
 
+  it('does not flag a daily overload when split lessons stay within the daily lesson limit', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'r1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1' },
+        { id: 'r2', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2' },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r2', teacherId: 't2' }),
+      lesson('l3', 'g1', 'subj2', 'Monday', 2, { teacherId: 't2' }),
+      lesson('l4', 'g1', 'subj3', 'Monday', 3, { teacherId: 't2' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toBeUndefined();
+    expect(a.byLesson.get('l4')).toBeUndefined();
+  });
+
+  it('flags a daily overload when split lessons plus others exceed the daily lesson limit', () => {
+    const project = makeProject({
+      groups: [{ id: 'g1', name: '5-A', grade: 5, subgroups: [], periodStart: 1, periodEnd: 6, maxDailyLessons: 2 }],
+      curriculum: [
+        { id: 'r1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1' },
+        { id: 'r2', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2' },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r2', teacherId: 't2' }),
+      lesson('l3', 'g1', 'subj2', 'Monday', 2, { teacherId: 't2' }),
+      lesson('l4', 'g1', 'subj3', 'Monday', 3, { teacherId: 't2' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.DAILY_OVERLOAD);
+    expect(a.byLesson.get('l4')).toContain(CONFLICT_REASON.DAILY_OVERLOAD);
+  });
+
   it('counts unassigned lessons per rule from the pool', () => {
     const project = makeProject();
     const pool = [

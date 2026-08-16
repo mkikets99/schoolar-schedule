@@ -153,12 +153,13 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
     for (const g of project.groups) capacity.set(g.id, weeklyCapacity(g));
 
     for (const semester of ['semester1', 'semester2'] as const) {
-      const placed = new Map<string, number>();
+      const placedSlots = new Map<string, Set<string>>();
       for (const lesson of schedules[semester].schedule) {
-        placed.set(lesson.groupId, (placed.get(lesson.groupId) || 0) + 1);
+        if (!placedSlots.has(lesson.groupId)) placedSlots.set(lesson.groupId, new Set());
+        placedSlots.get(lesson.groupId)!.add(`${lesson.day}|${lesson.period}`);
       }
       for (const g of project.groups) {
-        expect(placed.get(g.id) || 0).toBeLessThanOrEqual(capacity.get(g.id)!);
+        expect(placedSlots.get(g.id)?.size || 0).toBeLessThanOrEqual(capacity.get(g.id)!);
       }
     }
   });
@@ -178,17 +179,27 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
         if (h > 0) hoursByRule.set(rule.id, h);
       }
 
-      const needed = new Map<string, number>();
+      const byKey = new Map<string, CurriculumRule[]>();
       for (const rule of project.curriculum) {
-        const h = hoursByRule.get(rule.id);
-        if (!h) continue;
-        needed.set(rule.groupId, (needed.get(rule.groupId) || 0) + h);
+        const key = `${rule.groupId}|${rule.subjectId}`;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push(rule);
       }
 
-      const placed = new Map<string, number>();
-      for (const lesson of result.schedule) {
-        placed.set(lesson.groupId, (placed.get(lesson.groupId) || 0) + 1);
+      const needed = new Map<string, number>();
+      for (const rules of byKey.values()) {
+        const h = Math.max(...rules.map((r) => hoursByRule.get(r.id) || 0));
+        if (h <= 0) continue;
+        needed.set(rules[0].groupId, (needed.get(rules[0].groupId) || 0) + h);
       }
+
+      const placedSlots = new Map<string, Set<string>>();
+      for (const lesson of result.schedule) {
+        if (!placedSlots.has(lesson.groupId)) placedSlots.set(lesson.groupId, new Set());
+        placedSlots.get(lesson.groupId)!.add(`${lesson.day}|${lesson.period}`);
+      }
+      const placed = new Map<string, number>();
+      for (const [gid, slots] of placedSlots) placed.set(gid, slots.size);
 
       const missingPerConflict = new Map<string, number>();
       for (const c of result.conflicts) {

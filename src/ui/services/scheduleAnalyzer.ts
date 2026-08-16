@@ -126,7 +126,7 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
     }
   }
 
-  const dailyCount = new Map<string, Map<string, number>>();
+  const dailySlots = new Map<string, Set<string>>();
   for (const lesson of placed) {
     const group = groupMap.get(lesson.groupId);
     if (!group) continue;
@@ -148,14 +148,18 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
       add(lesson.id, CONFLICT_REASON.TEACHER_BUSY);
     }
 
-    if (!dailyCount.has(lesson.groupId)) dailyCount.set(lesson.groupId, new Map());
-    const dm = dailyCount.get(lesson.groupId)!;
-    dm.set(lesson.day, (dm.get(lesson.day) || 0) + 1);
+    if (!dailySlots.has(lesson.groupId)) dailySlots.set(lesson.groupId, new Set());
+    dailySlots.get(lesson.groupId)!.add(`${lesson.day}|${lesson.period}`);
   }
 
-  for (const [groupId, dm] of dailyCount) {
+  for (const [groupId, slots] of dailySlots) {
     const maxDaily = groupMap.get(groupId)?.maxDailyLessons ?? 8;
-    for (const [day, count] of dm) {
+    const perDay = new Map<string, number>();
+    for (const key of slots) {
+      const day = key.slice(0, key.indexOf('|'));
+      perDay.set(day, (perDay.get(day) || 0) + 1);
+    }
+    for (const [day, count] of perDay) {
       if (count <= maxDaily) continue;
       for (const lesson of placed) {
         if (lesson.groupId === groupId && lesson.day === day) add(lesson.id, CONFLICT_REASON.DAILY_OVERLOAD);

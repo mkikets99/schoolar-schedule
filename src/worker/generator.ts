@@ -15,6 +15,10 @@ interface SchedulingUnit {
   lessons: LessonStub[];
 }
 
+function unitSlotCount(unit: SchedulingUnit): number {
+  return unit.type === 'double' ? 2 : 1;
+}
+
 interface GroupScheduleConfig {
   periodStart: number;
   periodEnd: number;
@@ -141,7 +145,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
 
   const groupLessonTotals = new Map<string, number>();
   for (const unit of units) {
-    groupLessonTotals.set(unit.groupId, (groupLessonTotals.get(unit.groupId) || 0) + unit.lessons.length);
+    groupLessonTotals.set(unit.groupId, (groupLessonTotals.get(unit.groupId) || 0) + unitSlotCount(unit));
   }
 
   const dailyTargets = new Map<string, number[]>();
@@ -250,12 +254,14 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       period,
     });
 
-    groupBusy.add(`${lesson.groupId}-${slotKey}`);
+    const groupSlotKey = `${lesson.groupId}-${slotKey}`;
+    const firstInSlot = !groupBusy.has(groupSlotKey);
+    groupBusy.add(groupSlotKey);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
     roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
-    if (di >= 0) {
+    if (di >= 0 && firstInSlot) {
       const counts = dailyCounts.get(lesson.groupId);
       if (counts) counts[di]++;
     }
@@ -312,7 +318,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
 
     const counts = dailyCounts.get(unit.groupId);
     const maxDaily = groupConfig.get(unit.groupId)?.maxDaily ?? 8;
-    if (counts && counts[days.indexOf(day)] + unit.lessons.length > maxDaily) return false;
+    if (counts && counts[days.indexOf(day)] + unitSlotCount(unit) > maxDaily) return false;
 
     for (const lesson of unit.lessons) {
       if (!canPlace(lesson, day, period, true)) return false;
@@ -340,7 +346,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     const maxDaily = cfg?.maxDaily ?? 8;
 
     const dayScores = days.map((day, di) => {
-      const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
+      const extra = unitSlotCount(unit);
       const fits = counts[di] + extra <= maxDaily;
       return {
         day, index: di,
@@ -365,7 +371,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       for (const day of days) {
         if (placed) break;
         const di = days.indexOf(day);
-        const extra = unit.type === 'double' ? 2 : unit.type === 'split' ? unit.lessons.length : 1;
+        const extra = unitSlotCount(unit);
         if (counts[di] >= maxDaily) continue;
         if (counts[di] + extra > maxDaily) continue;
         const ordered = getPeriodsForGroup(unit.groupId);
