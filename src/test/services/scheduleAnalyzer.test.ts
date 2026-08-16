@@ -50,6 +50,17 @@ describe('analyzeSchedule', () => {
     expect(a.byLesson.get('l2')).toContain(CONFLICT_REASON.TEACHER_SLOT);
   });
 
+  it('records the lesson blocks that cause a slot conflict', () => {
+    const project = makeProject();
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { teacherId: 't1' }),
+      lesson('l2', 'g2', 'subj2', 'Monday', 1, { teacherId: 't1' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.causesByLesson.get('l1')?.map(l => l.id)).toEqual(['l2']);
+    expect(a.causesByLesson.get('l2')?.map(l => l.id)).toEqual(['l1']);
+  });
+
   it('flags a group with two different subjects in the same slot', () => {
     const project = makeProject();
     const placed = [

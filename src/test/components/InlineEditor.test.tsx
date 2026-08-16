@@ -160,8 +160,12 @@ describe('InlineEditor', () => {
     const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
     const lesson = container.querySelector('.timeline-lesson')!;
     expect(lesson.className).toContain('conflict');
-    expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_teacher_slot');
-    expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_room_slot');
+    const title = (container.querySelector('.timeline-lesson') as HTMLElement).title;
+    expect(title).toContain('conflict_teacher_slot');
+    expect(title).toContain('conflict_room_slot');
+    expect(title).toContain('conflict_caused_by');
+    expect(title).toContain('5-B');
+    expect(title).toContain('monday, period 1');
   });
 
   it('counts a split lesson (same group+subject in one slot) as 1 unassigned in the checker', () => {

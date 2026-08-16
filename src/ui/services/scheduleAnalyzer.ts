@@ -12,6 +12,7 @@ export const CONFLICT_REASON = {
 
 export interface ScheduleAnalysis {
   byLesson: Map<string, string[]>;
+  causesByLesson: Map<string, Lesson[]>;
   unassignedByRule: Map<string, number>;
   assignedCount: number;
   neededCount: number;
@@ -62,6 +63,16 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
     if (!reasons.get(id)!.includes(reason)) reasons.get(id)!.push(reason);
   };
 
+  const causesByLesson = new Map<string, Lesson[]>();
+  const lessonById = new Map(placed.map(l => [l.id, l]));
+  const addCause = (id: string, otherId: string) => {
+    if (id === otherId) return;
+    const cause = lessonById.get(otherId);
+    if (!cause) return;
+    if (!causesByLesson.has(id)) causesByLesson.set(id, []);
+    if (!causesByLesson.get(id)!.some(c => c.id === cause.id)) causesByLesson.get(id)!.push(cause);
+  };
+
   const teacherSlot = new Map<string, Map<string, string[]>>();
   const groupSlot = new Map<string, Map<string, string[]>>();
   const roomSlot = new Map<string, Map<string, string[]>>();
@@ -91,27 +102,38 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
 
   for (const m of teacherSlot.values()) {
     for (const ids of m.values()) {
-      if (ids.length > 1) for (const id of ids) add(id, CONFLICT_REASON.TEACHER_SLOT);
+      if (ids.length <= 1) continue;
+      for (const id of ids) {
+        add(id, CONFLICT_REASON.TEACHER_SLOT);
+        for (const other of ids) addCause(id, other);
+      }
     }
   }
 
   for (const m of roomSlot.values()) {
     for (const ids of m.values()) {
       if (ids.length <= 1) continue;
-      const slotLessons = ids.map(id => placed.find(x => x.id === id)).filter((x): x is Lesson => !!x);
+      const slotLessons = ids.map(id => lessonById.get(id)).filter((x): x is Lesson => !!x);
       const sameSplit = slotLessons.length > 1
         && new Set(slotLessons.map(l => l.groupId)).size === 1
         && new Set(slotLessons.map(l => l.subjectId)).size === 1;
       if (sameSplit) continue;
-      for (const id of ids) add(id, CONFLICT_REASON.ROOM_SLOT);
+      for (const id of ids) {
+        add(id, CONFLICT_REASON.ROOM_SLOT);
+        for (const other of ids) addCause(id, other);
+      }
     }
   }
 
   for (const m of groupSlot.values()) {
     for (const ids of m.values()) {
       if (ids.length <= 1) continue;
-      const subjects = new Set(ids.map(id => placed.find(x => x.id === id)?.subjectId));
-      if (subjects.size > 1) for (const id of ids) add(id, CONFLICT_REASON.GROUP_SLOT);
+      const subjects = new Set(ids.map(id => lessonById.get(id)?.subjectId));
+      if (subjects.size <= 1) continue;
+      for (const id of ids) {
+        add(id, CONFLICT_REASON.GROUP_SLOT);
+        for (const other of ids) addCause(id, other);
+      }
     }
   }
 
@@ -176,6 +198,7 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
 
   return {
     byLesson: reasons,
+    causesByLesson,
     unassignedByRule,
     assignedCount: counts.assigned,
     neededCount: counts.needed,

@@ -198,6 +198,23 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     if (confirm(t('editor_confirm_reset'))) seed();
   };
 
+  const formatLesson = (l: Lesson) => {
+    const subject = getSubject(l.subjectId);
+    const parts = [getGroupName(l.groupId), subject?.shortName || subject?.name || '?'];
+    const teacher = getTeacherName(l.teacherId);
+    if (teacher) parts.push(teacher);
+    return `${parts.join(' • ')} — ${t(l.day.toLowerCase())}, ${t('period')} ${l.period}`;
+  };
+
+  const lessonTitle = (lesson: Lesson, reasons: string[]) => {
+    if (reasons.length === 0) return `${getGroupName(lesson.groupId)} • ${getTeacherName(lesson.teacherId)}`;
+    const lines = reasons.map(r => t(r));
+    for (const cause of analysis.causesByLesson.get(lesson.id) || []) {
+      lines.push(`${t('conflict_caused_by')}: ${formatLesson(cause)}`);
+    }
+    return lines.join('\n');
+  };
+
   const renderLesson = (lesson: Lesson) => {
     const reasons = analysis.byLesson.get(lesson.id) || [];
     const subject = getSubject(lesson.subjectId);
@@ -209,7 +226,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
         draggable
         onDragStart={(e) => handleDragStart(e, lesson.id)}
         style={{ borderLeftColor: subject?.color || undefined }}
-        title={conflicted ? reasons.map(r => t(r)).join('\n') : `${getGroupName(lesson.groupId)} • ${getTeacherName(lesson.teacherId)}`}
+        title={lessonTitle(lesson, reasons)}
       >
         <span className="timeline-lesson-subject">{subject?.shortName || subject?.name || '?'}</span>
         <span className="timeline-lesson-group">{getGroupName(lesson.groupId)}</span>
