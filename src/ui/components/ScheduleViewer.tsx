@@ -4,15 +4,17 @@ import { useProject } from '../context/ProjectContext';
 import { ExportModal } from './ExportModal';
 import { ExportContext } from '../services/ExportService';
 import { Modal } from './Modal';
-import { CurriculumRule } from '../../shared/types';
+import { InlineEditor } from './InlineEditor';
+import { CurriculumRule, ScheduleResult } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export const ScheduleViewer = () => {
   const { t } = useTranslation();
-  const { project } = useProject();
+  const { project, updateGeneratedSchedules, updateGeneratedSchedule } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
+  const [editMode, setEditMode] = useState(false);
   const scheduleResult = project?.generatedSchedules
     ? project.generatedSchedules[activeSemester]
     : project?.generatedSchedule;
@@ -205,6 +207,15 @@ export const ScheduleViewer = () => {
   const isLocked = (lessonId: string) => lockedLessons.has(lessonId);
   const isConflict = (lessonId: string) => conflictKeys.has(lessonId);
 
+  const handleEditorSave = (result: ScheduleResult) => {
+    if (!project) return;
+    if (project.generatedSchedules) {
+      updateGeneratedSchedules({ ...project.generatedSchedules, [activeSemester]: result });
+    } else {
+      updateGeneratedSchedule(result);
+    }
+  };
+
   const hasSchedule = schedule.length > 0;
 
   return (
@@ -227,31 +238,40 @@ export const ScheduleViewer = () => {
           </button>
         </div>
 
-        <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
-          <option value="all">{t('all')}</option>
-          <option value="group">{t('view_group')}</option>
-          <option value="teacher">{t('view_teacher')}</option>
-          <option value="subject">{t('view_subject')}</option>
-        </select>
+        <div className="mode-toggle">
+          <button className={`mode-btn ${!editMode ? 'active' : ''}`} onClick={() => setEditMode(false)}>{t('mode_view')}</button>
+          <button className={`mode-btn ${editMode ? 'active' : ''}`} onClick={() => setEditMode(true)} disabled={!hasSchedule}>{t('mode_edit')}</button>
+        </div>
 
-        {filterType !== 'all' && (
-          <select value={filterId} onChange={(e) => setFilterId(e.target.value)}>
-            <option value="">{t('select_view', { type: filterType })}</option>
-            {filterType === 'group'
-              ? groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)
-              : filterType === 'teacher'
-              ? teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
-              : subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
-            }
-          </select>
-        )}
+        {!editMode && (
+          <>
+            <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
+              <option value="all">{t('all')}</option>
+              <option value="group">{t('view_group')}</option>
+              <option value="teacher">{t('view_teacher')}</option>
+              <option value="subject">{t('view_subject')}</option>
+            </select>
 
-        {filterType === 'all' && (
-          <div className="summary-badge">
-            {schedule.length} {t('lessons_assigned').toLowerCase()}
-            {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
-            {gapCount > 0 && <span className="gap-count"> • {gapCount} {t('unfilled_gaps').toLowerCase()}</span>}
-          </div>
+            {filterType !== 'all' && (
+              <select value={filterId} onChange={(e) => setFilterId(e.target.value)}>
+                <option value="">{t('select_view', { type: filterType })}</option>
+                {filterType === 'group'
+                  ? groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)
+                  : filterType === 'teacher'
+                  ? teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+                  : subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                }
+              </select>
+            )}
+
+            {filterType === 'all' && (
+              <div className="summary-badge">
+                {schedule.length} {t('lessons_assigned').toLowerCase()}
+                {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
+                {gapCount > 0 && <span className="gap-count"> • {gapCount} {t('unfilled_gaps').toLowerCase()}</span>}
+              </div>
+            )}
+          </>
         )}
 
         {hasSchedule && (
@@ -290,6 +310,12 @@ export const ScheduleViewer = () => {
 
       {!hasSchedule ? (
         <div className="no-selection">{t('generate_schedule_first')}</div>
+      ) : editMode && project ? (
+        <InlineEditor
+          project={project}
+          activeSemester={activeSemester}
+          onSave={handleEditorSave}
+        />
       ) : (
         <div className="schedule-grid-container">
           <table className="schedule-grid full-schedule" id="schedule-table">
