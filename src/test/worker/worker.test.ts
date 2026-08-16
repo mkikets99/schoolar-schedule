@@ -167,6 +167,11 @@ async function generateTestSchedule(project: ProjectState) {
     dailyCounts.set(gid, days.map(() => 0));
   }
 
+  const teacherDailyCounts = new Map<string, number[]>();
+  for (const t of project.teachers || []) {
+    teacherDailyCounts.set(t.id, days.map(() => 0));
+  }
+
   units.sort((a, b) => {
     const da = a.type === 'double' ? 0 : 1;
     const db = b.type === 'double' ? 0 : 1;
@@ -255,9 +260,15 @@ async function generateTestSchedule(project: ProjectState) {
     roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
-    if (di >= 0 && firstInSlot) {
-      const counts = dailyCounts.get(lesson.groupId);
-      if (counts) counts[di]++;
+    if (di >= 0) {
+      if (firstInSlot) {
+        const counts = dailyCounts.get(lesson.groupId);
+        if (counts) counts[di]++;
+      }
+      if (lesson.teacherId) {
+        const tcounts = teacherDailyCounts.get(lesson.teacherId);
+        if (tcounts) tcounts[di]++;
+      }
     }
   }
 
@@ -347,6 +358,16 @@ async function generateTestSchedule(project: ProjectState) {
     return score;
   }
 
+  function teacherDayBonus(unit: SchedulingUnit, di: number): number {
+    let bonus = 0;
+    for (const lesson of unit.lessons) {
+      if (!lesson.teacherId) continue;
+      const counts = teacherDailyCounts.get(lesson.teacherId);
+      if (counts && counts[di] === 1) bonus = 2;
+    }
+    return bonus;
+  }
+
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
@@ -369,7 +390,7 @@ async function generateTestSchedule(project: ProjectState) {
       const fits = counts[di] + extra <= maxDaily;
       return {
         day, index: di,
-        need: counts[di] >= maxDaily || !fits ? -999 : targets[di] - counts[di],
+        need: counts[di] >= maxDaily || !fits ? -999 : (targets[di] - counts[di]) + teacherDayBonus(unit, di),
       };
     });
     dayScores.sort((a, b) => b.need - a.need);
@@ -831,13 +852,17 @@ describe('Worker scheduling algorithm', () => {
 
     expect(result.schedule).toHaveLength(5);
     expect(result.conflicts).toHaveLength(0);
-    for (const day of ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']) {
-      const dayLessons = result.schedule
-        .filter((l: any) => l.groupId === 'g1' && l.day === day)
-        .sort((a: any, b: any) => a.period - b.period);
-      expect(dayLessons).toHaveLength(1);
-      expect(dayLessons[0].period).toBe(2);
+    for (const lesson of result.schedule) {
+      expect(lesson.period).not.toBe(1);
     }
+
+    const dayCounts = new Map<string, number>();
+    for (const lesson of result.schedule) {
+      dayCounts.set(lesson.day, (dayCounts.get(lesson.day) || 0) + 1);
+    }
+    expect(dayCounts.size).toBeGreaterThanOrEqual(2);
+    expect(dayCounts.size).toBeLessThan(5);
+    expect(Math.max(...dayCounts.values())).toBeGreaterThanOrEqual(2);
   });
 
   it('does not schedule a teacher at two slots simultaneously', async () => {
@@ -873,22 +898,41 @@ describe('Worker scheduling algorithm', () => {
         { id: 'g2', name: '6-B', grade: 6, subgroups: [] },
       ],
       curriculum: [
-        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
-        { id: 'c2', groupId: 'g2', subjectId: 'subj-math', hoursPerWeek: 2, teacherId: 't2', roomId: 'r2' },
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 1, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj-math', hoursPerWeek: 1, teacherId: 't2', roomId: 'r2' },
       ],
     });
 
     const result = await generateTestSchedule(project);
 
-    expect(result.schedule).toHaveLength(4);
+    expect(result.schedule).toHaveLength(2);
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.schedule[0].day).toBe(result.schedule[1].day);
+    expect(Math.abs(result.schedule[0].period - result.schedule[1].period)).toBe(1);
+  });
+
+  it('clusters a teachers lessons into 2-3 per day instead of isolated singles', async () => {
+    const project = makeProject({
+      teachers: [{ id: 't1', name: 'Teacher A', subjects: ['subj-math'] }],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 6, teacherId: 't1', roomId: 'r1' },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    expect(result.schedule).toHaveLength(6);
     expect(result.conflicts).toHaveLength(0);
 
+    const dayCounts = new Map<string, number>();
     for (const lesson of result.schedule) {
-      const sameDay = result.schedule.filter(
-        (l: any) => l.groupId !== lesson.groupId && l.day === lesson.day
-      );
-      expect(sameDay).toHaveLength(1);
-      expect(Math.abs(sameDay[0].period - lesson.period)).toBe(1);
+      expect(lesson.teacherId).toBe('t1');
+      dayCounts.set(lesson.day, (dayCounts.get(lesson.day) || 0) + 1);
+    }
+
+    for (const count of dayCounts.values()) {
+      expect(count).toBeGreaterThanOrEqual(2);
+      expect(count).toBeLessThanOrEqual(3);
     }
   });
 });

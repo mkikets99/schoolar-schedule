@@ -247,6 +247,31 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
     }
   });
 
+  it('reports teacher single-lesson days per semester', () => {
+    const teacherById = new Map(project.teachers.map((t) => [t.id, t.name || t.id]));
+    for (const semester of ['semester1', 'semester2'] as const) {
+      const dayCounts = new Map<string, Map<string, number>>();
+      for (const lesson of schedules[semester].schedule) {
+        if (!lesson.teacherId) continue;
+        if (!dayCounts.has(lesson.teacherId)) dayCounts.set(lesson.teacherId, new Map());
+        const counts = dayCounts.get(lesson.teacherId)!;
+        counts.set(lesson.day, (counts.get(lesson.day) || 0) + 1);
+      }
+      let singleDays = 0;
+      const worst: string[] = [];
+      for (const [tid, counts] of dayCounts) {
+        const singles = [...counts.values()].filter((c) => c === 1).length;
+        singleDays += singles;
+        if (singles > 0) {
+          worst.push(`${teacherById.get(tid)} (${[...counts.values()].sort((a, b) => b - a).join('/')})`);
+        }
+      }
+      console.log(`=== TEACHER SINGLE-LESSON DAYS ${semester.toUpperCase()} ===`);
+      console.log(`Teachers with a single-lesson day: ${worst.length ? worst.join('; ') : 'none'}`);
+      console.log(`  TOTAL single-lesson days: ${singleDays}`);
+    }
+  });
+
   it('reports unfilled gap slots (gray cells) per semester', () => {
     for (const semester of ['semester1', 'semester2'] as const) {
       const gapCounts = new Map<string, number>();

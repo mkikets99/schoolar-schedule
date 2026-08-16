@@ -174,6 +174,11 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     dailyCounts.set(gid, days.map(() => 0));
   }
 
+  const teacherDailyCounts = new Map<string, number[]>();
+  for (const t of project.teachers || []) {
+    teacherDailyCounts.set(t.id, days.map(() => 0));
+  }
+
   units.sort((a, b) => {
     const da = a.type === 'double' ? 0 : 1;
     const db = b.type === 'double' ? 0 : 1;
@@ -266,9 +271,15 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
-    if (di >= 0 && firstInSlot) {
-      const counts = dailyCounts.get(lesson.groupId);
-      if (counts) counts[di]++;
+    if (di >= 0) {
+      if (firstInSlot) {
+        const counts = dailyCounts.get(lesson.groupId);
+        if (counts) counts[di]++;
+      }
+      if (lesson.teacherId) {
+        const tcounts = teacherDailyCounts.get(lesson.teacherId);
+        if (tcounts) tcounts[di]++;
+      }
     }
   }
 
@@ -358,6 +369,16 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     return score;
   }
 
+  function teacherDayBonus(unit: SchedulingUnit, di: number): number {
+    let bonus = 0;
+    for (const lesson of unit.lessons) {
+      if (!lesson.teacherId) continue;
+      const counts = teacherDailyCounts.get(lesson.teacherId);
+      if (counts && counts[di] === 1) bonus = 2;
+    }
+    return bonus;
+  }
+
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
@@ -379,7 +400,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       const fits = counts[di] + extra <= maxDaily;
       return {
         day, index: di,
-        need: counts[di] >= maxDaily || !fits ? -999 : targets[di] - counts[di],
+        need: counts[di] >= maxDaily || !fits ? -999 : (targets[di] - counts[di]) + teacherDayBonus(unit, di),
       };
     });
     dayScores.sort((a, b) => b.need - a.need);
