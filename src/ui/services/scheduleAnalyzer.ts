@@ -18,6 +18,43 @@ export interface ScheduleAnalysis {
   conflictCount: number;
 }
 
+export interface LessonCounts {
+  assigned: number;
+  unassigned: number;
+  needed: number;
+}
+
+export function countLessons(grid: Lesson[], pool: Lesson[], project: ProjectState): LessonCounts {
+  const assignedSlots = new Set<string>();
+  for (const lesson of grid) {
+    assignedSlots.add(`${lesson.groupId}|${lesson.subjectId}|${lesson.day}|${lesson.period}`);
+  }
+
+  const splitSize = new Map<string, number>();
+  const seen = new Map<string, Set<string>>();
+  for (const rule of project.curriculum || []) {
+    const key = `${rule.groupId}|${rule.subjectId}`;
+    if (!seen.has(key)) seen.set(key, new Set());
+    seen.get(key)!.add(rule.id);
+  }
+  for (const ruleIds of seen.values()) {
+    for (const ruleId of ruleIds) splitSize.set(ruleId, ruleIds.size);
+  }
+
+  const byRule = new Map<string, number>();
+  for (const lesson of pool) {
+    byRule.set(lesson.ruleId, (byRule.get(lesson.ruleId) || 0) + 1);
+  }
+  let unassigned = 0;
+  for (const [ruleId, count] of byRule) {
+    unassigned += count / (splitSize.get(ruleId) || 1);
+  }
+  unassigned = Math.round(unassigned);
+
+  const assigned = assignedSlots.size;
+  return { assigned, unassigned, needed: assigned + unassigned };
+}
+
 export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: ProjectState): ScheduleAnalysis {
   const reasons = new Map<string, string[]>();
   const add = (id: string, reason: string) => {
@@ -131,11 +168,13 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
     unassignedByRule.set(lesson.ruleId, (unassignedByRule.get(lesson.ruleId) || 0) + 1);
   }
 
+  const counts = countLessons(placed, pool, project);
+
   return {
     byLesson: reasons,
     unassignedByRule,
-    assignedCount: placed.length,
-    neededCount: placed.length + pool.length,
+    assignedCount: counts.assigned,
+    neededCount: counts.needed,
     conflictCount: reasons.size,
   };
 }

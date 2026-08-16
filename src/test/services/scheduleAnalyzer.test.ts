@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ProjectState, Lesson, Constraint } from '../../shared/types';
-import { analyzeSchedule, buildConflicts, computeScore, CONFLICT_REASON } from '../../ui/services/scheduleAnalyzer';
+import { analyzeSchedule, buildConflicts, computeScore, countLessons, CONFLICT_REASON } from '../../ui/services/scheduleAnalyzer';
 
 const makeProject = (overrides: Partial<ProjectState> = {}, constraints: Constraint[] = []): ProjectState => ({
   version: '1.0.0',
@@ -140,6 +140,52 @@ describe('analyzeSchedule', () => {
     expect(a.unassignedByRule.get('rule-b')).toBe(1);
     expect(a.assignedCount).toBe(0);
     expect(a.neededCount).toBe(3);
+  });
+
+  it('counts a split lesson (same group+subject in one slot) as 1, not 2', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'r1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1' },
+        { id: 'r2', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2' },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r2', teacherId: 't2' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.assignedCount).toBe(1);
+    expect(a.neededCount).toBe(1);
+  });
+
+  it('counts a missing split lesson (both teacher parts) as 1 unassigned', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'r1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1' },
+        { id: 'r2', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2' },
+      ],
+    });
+    const pool = [
+      lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'r1' }),
+      lesson('p2', 'g1', 'subj1', '', 0, { ruleId: 'r2' }),
+    ];
+    const a = analyzeSchedule([], pool, project);
+    expect(a.assignedCount).toBe(0);
+    expect(a.neededCount).toBe(1);
+  });
+
+  it('keeps counting distinct subjects in the same slot as separate lessons', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'r1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1' },
+        { id: 'r2', groupId: 'g1', subjectId: 'subj2', hoursPerWeek: 2, teacherId: 't2' },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'r1' }),
+      lesson('l2', 'g1', 'subj2', 'Monday', 1, { ruleId: 'r2', teacherId: 't2' }),
+    ];
+    expect(countLessons(placed, [], project).assigned).toBe(2);
   });
 });
 

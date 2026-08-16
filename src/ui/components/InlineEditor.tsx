@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CurriculumRule, Lesson, ProjectState, ScheduleResult } from '../../shared/types';
-import { analyzeSchedule, buildConflicts, computeScore } from '../services/scheduleAnalyzer';
+import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -128,8 +128,17 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     [poolLessons, selectedGroupId]
   );
   const visibleConflictCount = useMemo(
-    () => visibleGrid.filter(l => (analysis.byLesson.get(l.id) || []).length > 0).length,
+    () => new Set(
+      visibleGrid
+        .filter(l => (analysis.byLesson.get(l.id) || []).length > 0)
+        .map(l => `${l.groupId}|${l.subjectId}|${l.day}|${l.period}`)
+    ).size,
     [visibleGrid, analysis]
+  );
+
+  const counts = useMemo(
+    () => countLessons(visibleGrid, visiblePool, project),
+    [visibleGrid, visiblePool, project]
   );
 
   const lessonsBySlot = useMemo(() => {
@@ -232,7 +241,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
         <button className="export-btn" onClick={handleApply}>{t('editor_apply')}</button>
         <button className="export-btn" onClick={handleReset}>{t('editor_reset')}</button>
         <span className="summary-badge">
-          {t('editor_assigned_count', { assigned: visibleGrid.length, needed: visibleGrid.length + visiblePool.length })}
+          {t('editor_assigned_count', { assigned: counts.assigned, needed: counts.needed })}
         </span>
         <span className={`summary-badge ${visibleConflictCount > 0 ? 'conflict-count' : ''}`}>
           {visibleConflictCount} {t('conflicts').toLowerCase()}
@@ -285,7 +294,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
 
         <div className="checker-zone" onDragOver={(e) => e.preventDefault()} onDrop={handlePoolDrop}>
           <h4 className="checker-zone-title">
-            {t('editor_unassigned')} — {getGroupName(selectedGroupId)} ({visiblePool.length})
+            {t('editor_unassigned')} — {getGroupName(selectedGroupId)} ({counts.unassigned})
           </h4>
           <p className="checker-zone-hint">{t('editor_checker_hint')}</p>
           {visiblePool.length === 0 ? (

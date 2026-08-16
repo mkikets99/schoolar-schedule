@@ -32,6 +32,36 @@ const makeProject = (): ProjectState => ({
   },
 });
 
+const makeSplitProject = (): ProjectState => ({
+  version: '1.0.0',
+  school: { id: 's1', name: 'Test School' },
+  academicYears: [],
+  teachers: [
+    { id: 't1', name: 'Anna', subjects: ['subj1'] },
+    { id: 't2', name: 'Bohdan', subjects: ['subj1'] },
+  ],
+  subjects: [{ id: 'subj1', name: 'English', shortName: 'En' }],
+  rooms: [{ id: 'r1', name: 'Room 1', types: [] }],
+  groups: [{ id: 'g1', name: '5-A', grade: 5, subgroups: [] }],
+  curriculum: [
+    { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+    { id: 'c2', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2', roomId: 'r1' },
+  ],
+  loadDistribution: [],
+  constraints: [],
+  generatedSchedule: {
+    schedule: [
+      { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+      { id: 'l2', ruleId: 'c2', groupId: 'g1', subjectId: 'subj1', teacherId: 't2', roomId: 'r1', day: 'Monday', period: 1 },
+    ],
+    conflicts: [
+      { type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 },
+      { type: 'UNASSIGNED_HOURS', ruleId: 'c2', missing: 1 },
+    ],
+    score: 0.5,
+  },
+});
+
 const makeTwoGroupProject = (): ProjectState => ({
   version: '1.0.0',
   school: { id: 's1', name: 'Test School' },
@@ -132,5 +162,12 @@ describe('InlineEditor', () => {
     expect(lesson.className).toContain('conflict');
     expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_teacher_slot');
     expect((container.querySelector('.timeline-lesson') as HTMLElement).title).toContain('conflict_room_slot');
+  });
+
+  it('counts a split lesson (same group+subject in one slot) as 1 unassigned in the checker', () => {
+    const { container } = render(<InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(2);
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A (1)');
   });
 });
