@@ -256,5 +256,12 @@
   "conflict_teacher_busy_constraint": "Обмеження «вчитель зайнятий» забороняє цей час",
   "conflict_no_first_period": "Цей предмет не може бути першим уроком",
   "conflict_out_of_range": "Поза дозволеним діапазоном періодів групи",
-  "conflict_daily_overload": "Група перевищує денний ліміт уроків"
+  "conflict_daily_overload": "Група перевищує денний ліміт уроків",
+  "empty_slot_curriculum_done": "Усі уроки цієї групи вже розподілені",
+  "empty_slot_daily_cap": "Група досягла денного ліміту уроків",
+  "empty_slot_teacher_busy": "У цей час зайняті всі вчителі, які можуть викладати тут",
+  "empty_slot_room_busy": "Бажаний клас зайнятий у цей час",
+  "empty_slot_no_first": "Ці предмети не можуть бути першим уроком",
+  "empty_slot_day_balance": "Залишено порожнім для балансування навантаження",
+  "gap_period_reason": "період {{period}}: {{reasons}}"
 }

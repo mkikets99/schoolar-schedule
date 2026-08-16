@@ -260,5 +260,12 @@
   "conflict_teacher_busy_constraint": "Teacher busy constraint forbids this time",
   "conflict_no_first_period": "This subject cannot be the first lesson",
   "conflict_out_of_range": "Outside the group's allowed period range",
-  "conflict_daily_overload": "Group exceeds its daily lesson limit"
+  "conflict_daily_overload": "Group exceeds its daily lesson limit",
+  "empty_slot_curriculum_done": "All lessons for this group are already placed",
+  "empty_slot_daily_cap": "Group is at its daily lesson limit",
+  "empty_slot_teacher_busy": "Every available teacher is busy at this time",
+  "empty_slot_room_busy": "The preferred room is occupied at this time",
+  "empty_slot_no_first": "These subjects cannot be the first lesson",
+  "empty_slot_day_balance": "Left empty to balance the daily load",
+  "gap_period_reason": "period {{period}}: {{reasons}}"
 }

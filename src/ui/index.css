@@ -815,6 +815,16 @@ tr.unassigned {
   white-space: nowrap;
 }
 
+.detail-sub {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: #999;
+  line-height: 1.4;
+  border-top: 1px solid #333;
+  padding-top: 0.4rem;
+  margin-top: 0.2rem;
+}
+
 .detail-empty {
   text-align: center;
   padding: 1.5rem;

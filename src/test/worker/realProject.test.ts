@@ -3,7 +3,8 @@ import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import JSZip from 'jszip';
 import { ProjectState, CurriculumRule, SemesterSchedules, SemesterSplit } from '../../shared/types';
-import { generateSemesterSchedules } from '../../worker/generator';
+import { generateSemesterSchedules, buildSemesterProject } from '../../worker/generator';
+import { analyzeEmptySlots } from '../../ui/services/scheduleAnalyzer';
 
 const PROJECT_FILE = path.join(process.cwd(), 'real_test.schoolproj');
 const hasRealProject = existsSync(PROJECT_FILE);
@@ -296,6 +297,34 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
       }
       console.log(`  TOTAL: ${totalGaps}`);
       expect(totalGaps).toBeGreaterThan(0);
+    }
+  });
+
+  it('explains why empty slots stayed empty per semester', () => {
+    for (const semester of ['semester1', 'semester2'] as const) {
+      const semesterProject = buildSemesterProject(project, semester === 'semester1' ? 1 : 2, splits);
+      const result = schedules[semester];
+      const pendingByRule = new Map<string, number>();
+      for (const c of result.conflicts) {
+        if (c.type === 'UNASSIGNED_HOURS' && c.ruleId) {
+          pendingByRule.set(c.ruleId, (pendingByRule.get(c.ruleId) || 0) + (c.missing ?? 1));
+        }
+      }
+      const reasons = analyzeEmptySlots(result.schedule, semesterProject, pendingByRule, DAYS);
+      const counts = new Map<string, number>();
+      let totalTags = 0;
+      for (const rs of reasons.values()) {
+        for (const r of rs) {
+          counts.set(r, (counts.get(r) || 0) + 1);
+          totalTags++;
+        }
+      }
+      console.log(`=== EMPTY SLOT REASONS ${semester.toUpperCase()} ===`);
+      for (const [r, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+        console.log(`  ${r}: ${n}`);
+      }
+      console.log(`  TOTAL reason tags: ${totalTags}`);
+      console.log(`  Slots with reasons: ${reasons.size}`);
     }
   });
 });

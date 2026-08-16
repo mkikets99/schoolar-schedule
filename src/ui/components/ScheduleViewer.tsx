@@ -6,6 +6,7 @@ import { ExportContext } from '../services/ExportService';
 import { Modal } from './Modal';
 import { InlineEditor } from './InlineEditor';
 import { SearchableSelect } from './SearchableSelect';
+import { analyzeEmptySlots } from '../services/scheduleAnalyzer';
 import { CurriculumRule, ScheduleResult } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -145,6 +146,17 @@ export const ScheduleViewer = () => {
     return total;
   }, [gapSlots]);
 
+  const emptySlotReasons = useMemo(() => {
+    if (!project) return new Map<string, string[]>();
+    const pendingByRule = new Map<string, number>();
+    for (const c of scheduleResult?.conflicts || []) {
+      if (c.type === 'UNASSIGNED_HOURS' && c.ruleId) {
+        pendingByRule.set(c.ruleId, (pendingByRule.get(c.ruleId) || 0) + (c.missing ?? 1));
+      }
+    }
+    return analyzeEmptySlots(schedule, project, pendingByRule, days);
+  }, [schedule, project, scheduleResult, days]);
+
   const getLessonsAt = (day: string, period: number) => {
     return displayedLessons.filter(l => l.day === day && l.period === period);
   };
@@ -153,6 +165,24 @@ export const ScheduleViewer = () => {
   const getTeacherName = (id?: string) => teachers.find(t => t.id === id)?.shortName || teachers.find(t => t.id === id)?.name || '';
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getRoomName = (id?: string) => rooms.find(r => r.id === id)?.name || '';
+
+  const gapReasonTitles = useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const gid of displayedGroupIds) {
+      const dayMap = groupGaps.get(gid);
+      if (!dayMap) continue;
+      for (const [day, periods] of dayMap) {
+        for (const p of periods) {
+          const key = `${day}-${p}`;
+          const reasons = emptySlotReasons.get(`${gid}|${day}|${p}`);
+          if (!reasons || reasons.length === 0) continue;
+          const text = `${getGroupName(gid) || gid}:\n${reasons.map(r => `• ${t(r)}`).join('\n')}`;
+          titles.set(key, titles.has(key) ? `${titles.get(key)}\n\n${text}` : text);
+        }
+      }
+    }
+    return titles;
+  }, [displayedGroupIds, groupGaps, emptySlotReasons, getGroupName, t]);
 
   const unassignedDetails = useMemo(() => {
     const perRule = new Map<string, number>();
@@ -171,17 +201,23 @@ export const ScheduleViewer = () => {
   }, [project, scheduleResult]);
 
   const gapDetails = useMemo(() => {
-    const rows: { groupId: string; day: string; periods: number[] }[] = [];
+    const rows: { groupId: string; day: string; periods: number[]; reasons: Map<number, string[]> }[] = [];
     for (const gid of displayedGroupIds) {
       const dayMap = groupGaps.get(gid);
       if (!dayMap) continue;
       for (const [day, periods] of dayMap) {
-        rows.push({ groupId: gid, day, periods: [...periods].sort((a, b) => a - b) });
+        const sorted = [...periods].sort((a, b) => a - b);
+        const reasons = new Map<number, string[]>();
+        for (const p of sorted) {
+          const rs = emptySlotReasons.get(`${gid}|${day}|${p}`);
+          if (rs && rs.length > 0) reasons.set(p, rs.map(r => t(r)));
+        }
+        rows.push({ groupId: gid, day, periods: sorted, reasons });
       }
     }
     rows.sort((a, b) => getGroupName(a.groupId).localeCompare(getGroupName(b.groupId)) || a.day.localeCompare(b.day));
     return rows;
-  }, [displayedGroupIds, groupGaps, getGroupName]);
+  }, [displayedGroupIds, groupGaps, getGroupName, emptySlotReasons, t]);
 
   const exportContext = useMemo<ExportContext>(() => ({
     schedule,
@@ -341,7 +377,7 @@ export const ScheduleViewer = () => {
                     return (
                       <td key={day} className={`slot ${lessons.length > 1 ? 'multi-slot' : ''} ${isGapSlot ? 'gap-slot' : ''}`}>
                         {lessons.length === 0 ? isGapSlot ? (
-                          <div className="gap-marker" title={t('unfilled_gaps_desc')}>
+                          <div className="gap-marker" title={gapReasonTitles.get(`${day}-${period}`) || t('unfilled_gaps_desc')}>
                             {gapGroups > 1 ? `×${gapGroups}` : '×'}
                           </div>
                         ) : null : lessons.length === 1 ? (() => {
@@ -423,6 +459,15 @@ export const ScheduleViewer = () => {
                   {t('row_group_day', { group: getGroupName(row.groupId), day: t(row.day.toLowerCase()) })}
                 </span>
                 <span className="detail-meta">{t('gap_periods', { periods: row.periods.join(', ') })}</span>
+                {row.periods.some(p => (row.reasons.get(p)?.length || 0) > 0) && (
+                  <div className="detail-sub">
+                    {row.periods.map(p => {
+                      const rs = row.reasons.get(p);
+                      if (!rs || rs.length === 0) return null;
+                      return <div key={p}>{t('gap_period_reason', { period: p, reasons: rs.join(', ') })}</div>;
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>

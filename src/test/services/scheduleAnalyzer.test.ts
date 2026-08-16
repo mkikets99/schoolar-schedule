@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { ProjectState, Lesson, Constraint } from '../../shared/types';
-import { analyzeSchedule, buildConflicts, computeScore, countLessons, CONFLICT_REASON } from '../../ui/services/scheduleAnalyzer';
+import {
+  analyzeSchedule,
+  buildConflicts,
+  computeScore,
+  countLessons,
+  CONFLICT_REASON,
+  analyzeEmptySlots,
+  buildPendingByRule,
+  EMPTY_SLOT_REASON,
+} from '../../ui/services/scheduleAnalyzer';
 
 const makeProject = (overrides: Partial<ProjectState> = {}, constraints: Constraint[] = []): ProjectState => ({
   version: '1.0.0',
@@ -278,5 +287,121 @@ describe('computeScore', () => {
 
   it('returns 1 when there is nothing to schedule', () => {
     expect(computeScore([], [], makeProject())).toBe(1);
+  });
+});
+
+describe('buildPendingByRule', () => {
+  it('computes remaining unassigned lessons per rule', () => {
+    const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-a' })];
+    const pool = [
+      lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' }),
+      lesson('p2', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' }),
+      lesson('p3', 'g2', 'subj2', '', 0, { ruleId: 'rule-b' }),
+    ];
+    const pending = buildPendingByRule(placed, pool);
+    expect(pending.get('rule-a')).toBe(1);
+    expect(pending.get('rule-b')).toBe(1);
+    expect(pending.size).toBe(2);
+  });
+
+  it('drops rules that are fully placed', () => {
+    const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-a' })];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    expect(buildPendingByRule(placed, pool).size).toBe(0);
+  });
+});
+
+describe('analyzeEmptySlots', () => {
+  const ruleA = (overrides: Partial<ProjectState> = {}) => makeProject({
+    curriculum: [
+      { id: 'rule-a', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+    ],
+    ...overrides,
+  });
+
+  it('reports curriculum-done when the group has no pending lessons', () => {
+    const project = ruleA();
+    const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-a' })];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|3')).toContain(EMPTY_SLOT_REASON.CURRICULUM_DONE);
+  });
+
+  it('does not report slots outside the group period range', () => {
+    const project = ruleA();
+    const placed: Lesson[] = [];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|7')).toBeUndefined();
+  });
+
+  it('reports a teacher busy elsewhere in the same slot', () => {
+    const project = ruleA();
+    const placed = [lesson('l2', 'g2', 'subj2', 'Monday', 3, { teacherId: 't1', roomId: undefined })];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|3')).toContain(EMPTY_SLOT_REASON.TEACHER_BUSY);
+    expect(reasons.get('g1|Monday|3')).not.toContain(EMPTY_SLOT_REASON.ROOM_BUSY);
+  });
+
+  it('reports a teacher-busy constraint blocking the slot', () => {
+    const project = ruleA();
+    const constraints: Constraint[] = [
+      { id: 'c1', kind: 'TEACHER_BUSY', teacherId: 't1', day: 'Monday', periods: [2] },
+    ];
+    project.constraints = constraints;
+    const placed: Lesson[] = [];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.TEACHER_BUSY);
+  });
+
+  it('reports a busy preferred room', () => {
+    const project = ruleA();
+    const placed = [lesson('l2', 'g2', 'subj2', 'Monday', 4, { teacherId: 't2', roomId: 'r1' })];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|4')).toContain(EMPTY_SLOT_REASON.ROOM_BUSY);
+    expect(reasons.get('g1|Monday|4')).not.toContain(EMPTY_SLOT_REASON.TEACHER_BUSY);
+  });
+
+  it('reports a no-first-period constraint at the first period', () => {
+    const project = ruleA();
+    project.constraints = [{ id: 'c2', kind: 'NO_FIRST_PERIOD', subjectId: 'subj1', groupId: 'g1' }];
+    const placed: Lesson[] = [];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|1')).toContain(EMPTY_SLOT_REASON.NO_FIRST);
+  });
+
+  it('reports the daily lesson cap', () => {
+    const project = ruleA();
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'x1', teacherId: 't1', roomId: 'r1' }),
+      lesson('l2', 'g1', 'subj2', 'Monday', 2, { ruleId: 'x2', teacherId: 't2', roomId: 'r1' }),
+      lesson('l3', 'g1', 'subj3', 'Monday', 3, { ruleId: 'x3', teacherId: 't2', roomId: 'r1' }),
+    ];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|4')).toContain(EMPTY_SLOT_REASON.DAILY_CAP);
+  });
+
+  it('reports day-balance when a free slot was skipped by the generator', () => {
+    const project = ruleA();
+    const placed: Lesson[] = [];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Tuesday|3')).toContain(EMPTY_SLOT_REASON.DAY_BALANCE);
+  });
+
+  it('combines teacher-busy and room-busy blockers for the same slot', () => {
+    const project = ruleA();
+    const placed = [
+      lesson('l1', 'g2', 'subj2', 'Monday', 2, { teacherId: 't1', roomId: 'r1' }),
+    ];
+    const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.TEACHER_BUSY);
+    expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.ROOM_BUSY);
   });
 });
