@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useProject } from '../context/ProjectContext';
 import { ExportModal } from './ExportModal';
 import { ExportContext } from '../services/ExportService';
+import { Modal } from './Modal';
+import { CurriculumRule } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -28,6 +30,8 @@ export const ScheduleViewer = () => {
   const [filterId, setFilterId] = useState<string>('');
   const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
   const [exportOpen, setExportOpen] = useState(false);
+  const [unassignedOpen, setUnassignedOpen] = useState(false);
+  const [gapsOpen, setGapsOpen] = useState(false);
 
   const days = DAYS;
   const allPeriods = ALL_PERIODS;
@@ -132,6 +136,35 @@ export const ScheduleViewer = () => {
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getRoomName = (id?: string) => rooms.find(r => r.id === id)?.name || '';
 
+  const unassignedDetails = useMemo(() => {
+    const perRule = new Map<string, number>();
+    for (const c of project?.generatedSchedule?.conflicts || []) {
+      if (c.type === 'UNASSIGNED_HOURS' && c.ruleId) {
+        perRule.set(c.ruleId, (perRule.get(c.ruleId) || 0) + (c.missing ?? 1));
+      }
+    }
+    const rows: { rule: CurriculumRule; missing: number }[] = [];
+    for (const [ruleId, missing] of perRule) {
+      const rule = (project?.curriculum || []).find(r => r.id === ruleId);
+      if (rule) rows.push({ rule, missing });
+    }
+    rows.sort((a, b) => b.missing - a.missing);
+    return rows;
+  }, [project]);
+
+  const gapDetails = useMemo(() => {
+    const rows: { groupId: string; day: string; periods: number[] }[] = [];
+    for (const gid of displayedGroupIds) {
+      const dayMap = groupGaps.get(gid);
+      if (!dayMap) continue;
+      for (const [day, periods] of dayMap) {
+        rows.push({ groupId: gid, day, periods: [...periods].sort((a, b) => a - b) });
+      }
+    }
+    rows.sort((a, b) => getGroupName(a.groupId).localeCompare(getGroupName(b.groupId)) || a.day.localeCompare(b.day));
+    return rows;
+  }, [displayedGroupIds, groupGaps, getGroupName]);
+
   const exportContext = useMemo<ExportContext>(() => ({
     schedule,
     groupIds: groups.map(g => g.id),
@@ -206,7 +239,7 @@ export const ScheduleViewer = () => {
           <span className="stat-label">{t('assigned')}</span>
           <span className="stat-value">{assignedHours}</span>
         </div>
-        <div className={`stat-block unassigned ${unassignedHours > 0 ? 'warn' : 'ok'}`}>
+        <div className={`stat-block unassigned clickable ${unassignedHours > 0 ? 'warn' : 'ok'}`} onClick={() => setUnassignedOpen(true)} title={t('unassigned_click_hint')}>
           <span className="stat-label">{t('unassigned')}</span>
           <span className="stat-value">{unassignedHours}</span>
         </div>
@@ -214,7 +247,7 @@ export const ScheduleViewer = () => {
           <span className="stat-label">{t('conflicts')}</span>
           <span className="stat-value">{conflictKeys.size}</span>
         </div>
-        <div className={`stat-block gaps ${gapCount > 0 ? 'gap-warn' : 'ok'}`}>
+        <div className={`stat-block gaps clickable ${gapCount > 0 ? 'gap-warn' : 'ok'}`} onClick={() => setGapsOpen(true)} title={t('gaps_click_hint')}>
           <span className="stat-label">{t('unfilled_gaps')}</span>
           <span className="stat-value">{gapCount}</span>
         </div>
@@ -296,6 +329,43 @@ export const ScheduleViewer = () => {
       )}
 
       <ExportModal isOpen={exportOpen} onClose={() => setExportOpen(false)} context={exportContext} />
+
+      <Modal isOpen={unassignedOpen} onClose={() => setUnassignedOpen(false)} title={t('unassigned_details')}>
+        {unassignedDetails.length === 0 ? (
+          <div className="detail-empty">{t('no_unassigned')}</div>
+        ) : (
+          <div className="detail-list">
+            {unassignedDetails.map(({ rule, missing }) => (
+              <div key={rule.id} className="detail-row">
+                <span className="detail-main">
+                  {getSubjectName(rule.subjectId)} — {getGroupName(rule.groupId)}
+                  {rule.teacherId && <span> ({getTeacherName(rule.teacherId)})</span>}
+                </span>
+                <span className="detail-meta">
+                  {t('unassigned_per_rule', { missing, hours: rule.hoursPerWeek })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={gapsOpen} onClose={() => setGapsOpen(false)} title={t('gap_details')}>
+        {gapDetails.length === 0 ? (
+          <div className="detail-empty">{t('no_gaps')}</div>
+        ) : (
+          <div className="detail-list">
+            {gapDetails.map((row, i) => (
+              <div key={i} className="detail-row">
+                <span className="detail-main">
+                  {t('row_group_day', { group: getGroupName(row.groupId), day: t(row.day.toLowerCase()) })}
+                </span>
+                <span className="detail-meta">{t('gap_periods', { periods: row.periods.join(', ') })}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

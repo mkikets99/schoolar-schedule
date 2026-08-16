@@ -750,6 +750,49 @@ tr.unassigned {
   flex-shrink: 0;
 }
 
+.stat-block.clickable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.stat-block.clickable:hover {
+  background-color: #2a2a2a;
+}
+
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  background-color: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+}
+
+.detail-main {
+  font-size: 0.9rem;
+  color: #ddd;
+}
+
+.detail-meta {
+  font-size: 0.8rem;
+  color: #888;
+  white-space: nowrap;
+}
+
+.detail-empty {
+  text-align: center;
+  padding: 1.5rem;
+  color: #888;
+}
+
 /* Forms */
 .form-field {
   margin-bottom: 1.25rem;

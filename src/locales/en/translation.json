@@ -229,5 +229,14 @@
   "need_subject": "Select a subject.",
   "confirm_delete_constraint": "Are you sure you want to delete this constraint?",
   "unfilled_gaps": "Unfilled gaps",
-  "unfilled_gaps_desc": "Empty slots in the middle of a class's day that could not be filled."
+  "unfilled_gaps_desc": "Empty slots in the middle of a class's day that could not be filled.",
+  "unassigned_details": "Unassigned Load",
+  "unassigned_click_hint": "Click to see which lessons could not be placed",
+  "no_unassigned": "All lessons are assigned.",
+  "unassigned_per_rule": "{{missing}} of {{hours}} h/week not placed",
+  "gap_details": "Unfilled Gaps",
+  "gaps_click_hint": "Click to see which slots could not be filled",
+  "no_gaps": "No unfilled gaps.",
+  "gap_periods": "periods {{periods}}",
+  "row_group_day": "{{group}} — {{day}}"
 }
