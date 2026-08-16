@@ -368,9 +368,39 @@ async function generateTestSchedule(project: ProjectState) {
     return bonus;
   }
 
+  function teacherCompactnessFor(teacherId: string, day: string, period: number): number {
+    const periods: number[] = [];
+    for (const s of schedule) {
+      if (s.teacherId === teacherId && s.day === day) periods.push(s.period);
+    }
+    if (periods.length === 0) return 0;
+    periods.push(period);
+    periods.sort((a, b) => a - b);
+    let maxGap = 0;
+    for (let i = 1; i < periods.length; i++) {
+      maxGap = Math.max(maxGap, periods[i] - periods[i - 1] - 1);
+    }
+    return maxGap <= 2 ? 4 - maxGap : -3;
+  }
+
+  function teacherCompactnessScore(unit: SchedulingUnit, day: string, period: number): number {
+    let score = 0;
+    const seen = new Set<string>();
+    for (const lesson of unit.lessons) {
+      if (!lesson.teacherId || seen.has(lesson.teacherId)) continue;
+      seen.add(lesson.teacherId);
+      const s = teacherCompactnessFor(lesson.teacherId, day, period);
+      score = seen.size === 1 ? s : Math.min(score, s);
+    }
+    return score;
+  }
+
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
+      const ca = teacherCompactnessScore(unit, day, a);
+      const cb = teacherCompactnessScore(unit, day, b);
+      if (ca !== cb) return cb - ca;
       const sa = gradeAdjacencyScore(unit, day, a);
       const sb = gradeAdjacencyScore(unit, day, b);
       if (sa !== sb) return sb - sa;
@@ -933,6 +963,39 @@ describe('Worker scheduling algorithm', () => {
     for (const count of dayCounts.values()) {
       expect(count).toBeGreaterThanOrEqual(2);
       expect(count).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('keeps each teachers daily lesson gaps at most 2 empty periods', async () => {
+    const project = makeProject({
+      teachers: [{ id: 't1', name: 'Teacher A', subjects: ['subj-math'] }],
+      groups: [
+        { id: 'g1', name: '10-A', grade: 10, subgroups: [] },
+        { id: 'g2', name: '10-B', grade: 10, subgroups: [] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 3, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj-math', hoursPerWeek: 3, teacherId: 't1', roomId: 'r2' },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    expect(result.schedule).toHaveLength(6);
+    expect(result.conflicts).toHaveLength(0);
+
+    const dayPeriods = new Map<string, number[]>();
+    for (const lesson of result.schedule) {
+      expect(lesson.teacherId).toBe('t1');
+      if (!dayPeriods.has(lesson.day)) dayPeriods.set(lesson.day, []);
+      dayPeriods.get(lesson.day)!.push(lesson.period);
+    }
+
+    for (const periods of dayPeriods.values()) {
+      const sorted = periods.sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i++) {
+        expect(sorted[i] - sorted[i - 1] - 1).toBeLessThanOrEqual(2);
+      }
     }
   });
 });

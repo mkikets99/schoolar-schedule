@@ -379,9 +379,39 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     return bonus;
   }
 
+  function teacherCompactnessFor(teacherId: string, day: string, period: number): number {
+    const periods: number[] = [];
+    for (const s of schedule) {
+      if (s.teacherId === teacherId && s.day === day) periods.push(s.period);
+    }
+    if (periods.length === 0) return 0;
+    periods.push(period);
+    periods.sort((a, b) => a - b);
+    let maxGap = 0;
+    for (let i = 1; i < periods.length; i++) {
+      maxGap = Math.max(maxGap, periods[i] - periods[i - 1] - 1);
+    }
+    return maxGap <= 2 ? 4 - maxGap : -3;
+  }
+
+  function teacherCompactnessScore(unit: SchedulingUnit, day: string, period: number): number {
+    let score = 0;
+    const seen = new Set<string>();
+    for (const lesson of unit.lessons) {
+      if (!lesson.teacherId || seen.has(lesson.teacherId)) continue;
+      seen.add(lesson.teacherId);
+      const s = teacherCompactnessFor(lesson.teacherId, day, period);
+      score = seen.size === 1 ? s : Math.min(score, s);
+    }
+    return score;
+  }
+
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
+      const ca = teacherCompactnessScore(unit, day, a);
+      const cb = teacherCompactnessScore(unit, day, b);
+      if (ca !== cb) return cb - ca;
       const sa = gradeAdjacencyScore(unit, day, a);
       const sb = gradeAdjacencyScore(unit, day, b);
       if (sa !== sb) return sb - sa;
