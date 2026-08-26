@@ -46,6 +46,7 @@ export const CurriculumEditor = () => {
     { id: 'sg-1', teacherId: '', roomId: '' },
     { id: 'sg-2', teacherId: '', roomId: '' },
   ]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const handleSplitCountChange = (n: number) => {
     setSplitCount(n);
@@ -150,11 +151,65 @@ export const CurriculumEditor = () => {
     defaultSort: { key: 'group', direction: 'asc' },
   });
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allDisplayedSelected = displayedCurriculum.length > 0 &&
+    displayedCurriculum.every(item => selectedIds.has(item.id));
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allDisplayedSelected) {
+        displayedCurriculum.forEach(item => next.delete(item.id));
+      } else {
+        displayedCurriculum.forEach(item => next.add(item.id));
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    if (confirm(t('confirm_delete_selected', { count: selectedIds.size }))) {
+      updateCurriculum(curriculum.filter(r => !selectedIds.has(r.id)));
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleDeleteAll = () => {
+    if (curriculum.length === 0) return;
+    if (confirm(t('confirm_delete_all', { count: curriculum.length }))) {
+      updateCurriculum([]);
+      setSelectedIds(new Set());
+    }
+  };
+
   return (
     <div className="entity-editor">
       <div className="view-header">
         <h2>{t('curriculum')}</h2>
-        <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_rule')}</button>
+        <div className="header-actions-group">
+          {curriculum.length > 0 && (
+            <>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={selectedIds.size === 0}
+                className="delete-btn"
+              >
+                {t('delete_selected')}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+              </button>
+              <button onClick={handleDeleteAll} className="delete-btn">{t('delete_all')}</button>
+            </>
+          )}
+          <button onClick={() => setIsModalOpen(true)} className="primary-btn">{t('add_rule')}</button>
+        </div>
       </div>
 
       <Modal
@@ -303,6 +358,15 @@ export const CurriculumEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
+            <th style={{ width: '40px' }}>
+              <input
+                type="checkbox"
+                checked={allDisplayedSelected}
+                onChange={toggleSelectAll}
+                disabled={displayedCurriculum.length === 0}
+                title={t('select_all_displayed')}
+              />
+            </th>
             <SortableTh label={t('group')} sortKey="group" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('subject')} sortKey="subject" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('hours')} sortKey="hours" sort={sort} onSort={toggleSort} style={{ width: '80px' }} />
@@ -318,6 +382,13 @@ export const CurriculumEditor = () => {
             const dup = isDuplicate(item);
             return (
               <tr key={item.id} className={dup ? 'split-group' : ''}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(item.id)}
+                    onChange={() => toggleSelect(item.id)}
+                  />
+                </td>
                 <td>{getGroupName(item.groupId)}</td>
                 <td>{getSubjectName(item.subjectId)}</td>
                 <td>
@@ -368,7 +439,7 @@ export const CurriculumEditor = () => {
           })}
           {displayedCurriculum.length === 0 && (
             <tr>
-              <td colSpan={8} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
+              <td colSpan={9} className="empty-row">{curriculum.length === 0 ? t('no_rules') : t('no_results')}</td>
             </tr>
           )}
         </tbody>
