@@ -13,11 +13,12 @@ export const GroupEditor = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', grade: 1, shift: 'first' as 'first' | 'second' });
+  const [newItem, setNewItem] = useState({ name: '', grade: 1, periodStart: 1, periodEnd: 8 });
   const [gradeFilter, setGradeFilter] = useState('');
-  const [shiftFilter, setShiftFilter] = useState('');
+  const [startFilter, setStartFilter] = useState('');
 
   const grades = [...new Set(groups.map(g => g.grade))].sort((a, b) => a - b);
+  const startOptions = [...new Set(groups.map(g => g.periodStart ?? 1))].sort((a, b) => a - b);
 
   const { query, setQuery, sort, toggleSort, rows: displayedGroups, total, shown } = useTableControls<Group>({
     rows: groups,
@@ -32,10 +33,7 @@ export const GroupEditor = () => {
     },
     extraFilter: (group) => {
       if (gradeFilter && group.grade !== parseInt(gradeFilter)) return false;
-      if (shiftFilter) {
-        const shift = group.periodStart === 6 ? 'second' : 'first';
-        if (shift !== shiftFilter) return false;
-      }
+      if (startFilter && (group.periodStart ?? 1) !== parseInt(startFilter)) return false;
       return true;
     },
     defaultSort: { key: 'name', direction: 'asc' },
@@ -49,13 +47,13 @@ export const GroupEditor = () => {
       name: newItem.name.trim(),
       grade: newItem.grade,
       subgroups: [],
-      periodStart: newItem.shift === 'first' ? 1 : 6,
-      periodEnd: newItem.shift === 'first' ? 8 : 12,
+      periodStart: newItem.periodStart,
+      periodEnd: newItem.periodEnd,
       maxDailyLessons: newItem.grade <= 4 ? 5 : 7,
     };
 
     updateGroups([...groups, group]);
-    setNewItem({ name: '', grade: 1, shift: 'first' });
+    setNewItem({ name: '', grade: 1, periodStart: 1, periodEnd: 8 });
     setIsModalOpen(false);
   };
 
@@ -127,14 +125,23 @@ export const GroupEditor = () => {
             max="12"
           />
         </FormField>
-        <FormField label={t('shift')}>
-          <select 
-            value={newItem.shift}
-            onChange={(e) => setNewItem({ ...newItem, shift: e.target.value as 'first' | 'second' })}
-          >
-            <option value="first">{t('shift_first')} (1-8)</option>
-            <option value="second">{t('shift_second')} (6-12)</option>
-          </select>
+        <FormField label={t('start_from')}>
+          <input 
+            type="number" 
+            value={newItem.periodStart}
+            onChange={(e) => setNewItem({ ...newItem, periodStart: parseInt(e.target.value) || 1 })}
+            min="1"
+            max="12"
+          />
+        </FormField>
+        <FormField label={t('end_at')}>
+          <input 
+            type="number" 
+            value={newItem.periodEnd}
+            onChange={(e) => setNewItem({ ...newItem, periodEnd: parseInt(e.target.value) || 8 })}
+            min="1"
+            max="12"
+          />
         </FormField>
       </Modal>
 
@@ -144,10 +151,9 @@ export const GroupEditor = () => {
           <option value="">{t('all_grades')}</option>
           {grades.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        <select className="table-filter" value={shiftFilter} onChange={(e) => setShiftFilter(e.target.value)}>
-          <option value="">{t('all_shifts')}</option>
-          <option value="first">{t('shift_first')}</option>
-          <option value="second">{t('shift_second')}</option>
+        <select className="table-filter" value={startFilter} onChange={(e) => setStartFilter(e.target.value)}>
+          <option value="">{t('all_starts')}</option>
+          {startOptions.map(s => <option key={s} value={s}>{t('start_from_value', { value: s })}</option>)}
         </select>
         <span className="table-count">{t('showing_count', { shown, total })}</span>
       </div>
@@ -157,8 +163,8 @@ export const GroupEditor = () => {
           <tr>
             <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('grade')} sortKey="grade" sort={sort} onSort={toggleSort} />
-            <th>{t('shift')}</th>
-            <th>{t('periods')}</th>
+            <th>{t('start_from')}</th>
+            <th>{t('end_at')}</th>
             <SortableTh label={t('max_daily')} sortKey="maxDailyLessons" sort={sort} onSort={toggleSort} />
             <th>{t('subgroups')}</th>
             <th style={{ width: '100px' }}>{t('actions')}</th>
@@ -184,21 +190,25 @@ export const GroupEditor = () => {
                 />
               </td>
               <td>
-                <select 
-                  value={item.periodStart === 6 ? 'second' : 'first'}
-                  onChange={(e) => {
-                    const shift = e.target.value;
-                    handleUpdate(item.id, {
-                      periodStart: shift === 'first' ? 1 : 6,
-                      periodEnd: shift === 'first' ? 8 : 12,
-                    });
-                  }}
-                >
-                  <option value="first">{t('shift_first')}</option>
-                  <option value="second">{t('shift_second')}</option>
-                </select>
+                <input 
+                  type="number" 
+                  value={item.periodStart ?? 1}
+                  onChange={(e) => handleUpdate(item.id, { periodStart: parseInt(e.target.value) || 1 })}
+                  min="1"
+                  max="12"
+                  style={{ width: '60px' }}
+                />
               </td>
-              <td>{item.periodStart ?? 1}–{item.periodEnd ?? 8}</td>
+              <td>
+                <input 
+                  type="number" 
+                  value={item.periodEnd ?? 8}
+                  onChange={(e) => handleUpdate(item.id, { periodEnd: parseInt(e.target.value) || 8 })}
+                  min="1"
+                  max="12"
+                  style={{ width: '60px' }}
+                />
+              </td>
               <td>
                 <input 
                   type="number" 
