@@ -1257,6 +1257,11 @@ tr.split-group + tr.split-group td {
   color: #FFC107;
 }
 
+.constraint-badge.forbid-lesson {
+  background: #ff4d4d33;
+  color: #ff6b6b;
+}
+
 .project-info {
   display: flex;
   align-items: center;

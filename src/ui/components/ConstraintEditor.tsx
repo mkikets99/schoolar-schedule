@@ -12,6 +12,7 @@ const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 const KIND_KEYS: Record<ConstraintKind, { labelKey: string; badgeClass: string }> = {
   TEACHER_BUSY: { labelKey: 'teacher_busy', badgeClass: 'teacher-busy' },
   NO_FIRST_PERIOD: { labelKey: 'no_first_period', badgeClass: 'no-first' },
+  FORBID_LESSON: { labelKey: 'forbid_lesson', badgeClass: 'forbid-lesson' },
 };
 
 export const ConstraintEditor = () => {
@@ -25,6 +26,7 @@ export const ConstraintEditor = () => {
 
   const [busyOpen, setBusyOpen] = useState(false);
   const [firstOpen, setFirstOpen] = useState(false);
+  const [forbidOpen, setForbidOpen] = useState(false);
   const [kindFilter, setKindFilter] = useState('');
 
   const [busyTeacherId, setBusyTeacherId] = useState('');
@@ -34,9 +36,18 @@ export const ConstraintEditor = () => {
   const [firstSubjectId, setFirstSubjectId] = useState('');
   const [firstGroupId, setFirstGroupId] = useState('');
 
+  const [forbidRuleId, setForbidRuleId] = useState('');
+  const [forbidSemester, setForbidSemester] = useState<1 | 2>(1);
+  const [forbidHours, setForbidHours] = useState(0);
+
   const teacherName = (id?: string) => (id ? teachers.find(x => x.id === id)?.name || id : '');
   const subjectName = (id?: string) => (id ? subjects.find(x => x.id === id)?.name || id : '');
   const groupName = (id?: string) => (id ? groups.find(x => x.id === id)?.name || '' : '');
+  const ruleLabel = (ruleId?: string) => {
+    const rule = (project?.curriculum || []).find(r => r.id === ruleId);
+    if (!rule) return ruleId || '';
+    return `${subjectName(rule.subjectId)} · ${groupName(rule.groupId)}`;
+  };
 
   const dayLabel = (day: string) => (day === '*' ? t('every_day') : t(day.toLowerCase()));
   const periodsLabel = (periods: number[]) => periods.slice().sort((a, b) => a - b).join(', ');
@@ -44,6 +55,9 @@ export const ConstraintEditor = () => {
   const getDetails = (c: Constraint): string => {
     if (c.kind === 'TEACHER_BUSY') {
       return `${teacherName(c.teacherId)} — ${dayLabel(c.day || '*')}: ${periodsLabel(c.periods || [])}`;
+    }
+    if (c.kind === 'FORBID_LESSON') {
+      return `${ruleLabel(c.ruleId)} — ${t(c.semester === 2 ? 'semester_2' : 'semester_1')}: ${c.hours ?? 0} ${t('hrs_wk')}`;
     }
     const scope = c.groupId ? `${groupName(c.groupId)} · ` : '';
     return `${scope}${subjectName(c.subjectId)} — ${t('cannot_be_first_period')}`;
@@ -106,6 +120,22 @@ export const ConstraintEditor = () => {
     setFirstOpen(false);
   };
 
+  const handleAddForbid = () => {
+    if (!forbidRuleId) { alert(t('need_rule')); return; }
+    const constraint: Constraint = {
+      id: crypto.randomUUID(),
+      kind: 'FORBID_LESSON',
+      ruleId: forbidRuleId,
+      semester: forbidSemester,
+      hours: Math.max(0, Math.floor(forbidHours || 0)),
+    };
+    updateConstraints([...constraints, constraint]);
+    setForbidRuleId('');
+    setForbidSemester(1);
+    setForbidHours(0);
+    setForbidOpen(false);
+  };
+
   const handleDelete = (id: string) => {
     if (confirm(t('confirm_delete_constraint'))) {
       updateConstraints(constraints.filter(c => c.id !== id));
@@ -121,6 +151,7 @@ export const ConstraintEditor = () => {
         <div className="header-actions" style={{ display: 'flex', gap: '0.5rem' }}>
           <button onClick={() => setBusyOpen(true)} className="secondary-btn" disabled={teachers.length === 0}>{t('add_teacher_busy')}</button>
           <button onClick={() => setFirstOpen(true)} className="primary-btn" disabled={subjects.length === 0}>{t('add_no_first_period')}</button>
+          <button onClick={() => setForbidOpen(true)} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_forbid_lesson')}</button>
         </div>
       </div>
 
@@ -202,12 +233,50 @@ export const ConstraintEditor = () => {
         </FormField>
       </Modal>
 
+      <Modal
+        isOpen={forbidOpen}
+        onClose={() => setForbidOpen(false)}
+        title={t('add_forbid_lesson')}
+        actions={
+          <>
+            <button onClick={() => setForbidOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAddForbid} className="primary-btn">{t('create')}</button>
+          </>
+        }
+      >
+        <p className="section-desc">{t('forbid_lesson_hint')}</p>
+        <FormField label={t('lesson')}>
+          <SearchableSelect
+            value={forbidRuleId}
+            onChange={setForbidRuleId}
+            options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
+            placeholder={t('select_rule')}
+            allowEmpty
+          />
+        </FormField>
+        <FormField label={t('semester')}>
+          <select value={forbidSemester} onChange={(e) => setForbidSemester(Number(e.target.value) as 1 | 2)}>
+            <option value={1}>{t('semester_1')}</option>
+            <option value={2}>{t('semester_2')}</option>
+          </select>
+        </FormField>
+        <FormField label={t('hours')}>
+          <input
+            type="number"
+            min={0}
+            value={forbidHours}
+            onChange={(e) => setForbidHours(Number(e.target.value))}
+          />
+        </FormField>
+      </Modal>
+
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
         <select className="table-filter" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
           <option value="">{t('all')}</option>
           <option value="TEACHER_BUSY">{t('teacher_busy')}</option>
           <option value="NO_FIRST_PERIOD">{t('no_first_period')}</option>
+          <option value="FORBID_LESSON">{t('forbid_lesson')}</option>
         </select>
         <span className="table-count">{t('showing_count', { shown, total })}</span>
       </div>

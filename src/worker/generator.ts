@@ -643,6 +643,30 @@ export function computeSemesterSplits(project: ProjectState): SemesterSplit[] {
     }
   }
 
+  // FORBID_LESSON constraints fix the per-semester hour distribution for a rule
+  // (hours === 0 forbids it in that semester). This overrides the automatic split.
+  const forbid = new Map<string, { semester: 1 | 2; hours: number }>();
+  for (const c of project.constraints || []) {
+    if (c.kind === 'FORBID_LESSON' && c.ruleId) {
+      forbid.set(c.ruleId, { semester: c.semester === 2 ? 2 : 1, hours: c.hours ?? 0 });
+    }
+  }
+  if (forbid.size > 0) {
+    for (const s of splits) {
+      const f = forbid.get(s.ruleId);
+      if (!f) continue;
+      const annual = s.first + s.second;
+      const h = Math.max(0, Math.min(Math.round(f.hours), annual));
+      if (f.semester === 1) {
+        s.first = h;
+        s.second = annual - h;
+      } else {
+        s.second = h;
+        s.first = annual - h;
+      }
+    }
+  }
+
   return splits;
 }
 
@@ -678,6 +702,14 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
   // lessons while producing the tidyest teacher distribution.
   const ATTEMPTS = 20;
 
+  // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
+  // the spillover must not move lessons across (respecting the forbid).
+  const fixedRules = new Set(
+    (project.constraints || [])
+      .filter((c) => c.kind === 'FORBID_LESSON' && c.ruleId)
+      .map((c) => c.ruleId!)
+  );
+
   async function generateAttempt(seed: number, progressBase: number, progressSpan: number) {
     const rng = mulberry32(seed);
     const runScaled = async (semesterProject: ProjectState) => {
@@ -709,6 +741,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
       if (out1.size === 0 && out2.size === 0) break;
 
       const nextSplits = splits.map((s) => {
+        if (fixedRules.has(s.ruleId)) return s; // forbid constraint: keep split fixed
         const movedFrom1 = out1.get(s.ruleId) || 0;
         const movedFrom2 = out2.get(s.ruleId) || 0;
         return {

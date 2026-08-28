@@ -73,6 +73,17 @@ describe('computeSemesterSplits', () => {
     expect(Math.max(splits[0].first, splits[0].second)).toBe(1);
     expect(Math.min(splits[0].first, splits[0].second)).toBe(0);
   });
+
+  it('applies a FORBID_LESSON constraint to fix the per-semester split', () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    project.constraints = [{ id: 'x', kind: 'FORBID_LESSON', ruleId: 'c1', semester: 2, hours: 3 }];
+    const splits = computeSemesterSplits(project);
+    // Annual total (10) is preserved; semester 2 gets the configured 3 hours.
+    expect(splits[0].first).toBe(7);
+    expect(splits[0].second).toBe(3);
+  });
 });
 
 describe('buildSemesterProject', () => {
@@ -170,5 +181,24 @@ describe('generateSemesterSchedules', () => {
     ].filter((c: any) => c.type === 'UNASSIGNED_HOURS');
     const missing = unassigned.reduce((sum: number, c: any) => sum + (c.missing ?? 1), 0);
     expect(missing).toBe(0);
+  });
+
+  it('respects a FORBID_LESSON constraint (rule absent from forbidden semester)', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    project.constraints = [{ id: 'x', kind: 'FORBID_LESSON', ruleId: 'c1', semester: 1, hours: 0 }];
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+
+    // c1 is forbidden in semester 1, so it must never appear there.
+    expect(payload.schedules.semester1.schedule.some((l: any) => l.ruleId === 'c1')).toBe(false);
+    // It is allowed (and gets placed) in semester 2.
+    expect(payload.schedules.semester2.schedule.some((l: any) => l.ruleId === 'c1')).toBe(true);
+    // The returned split reflects the forbid (0 hours in semester 1).
+    const split = payload.splits.find((s: any) => s.ruleId === 'c1');
+    expect(split.first).toBe(0);
+    expect(split.second).toBe(10);
   });
 });

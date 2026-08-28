@@ -65,7 +65,7 @@ export interface LoadDistribution {
   hours: number;
 }
 
-export type ConstraintKind = 'TEACHER_BUSY' | 'NO_FIRST_PERIOD';
+export type ConstraintKind = 'TEACHER_BUSY' | 'NO_FIRST_PERIOD' | 'FORBID_LESSON';
 
 export interface Constraint {
   id: string;
@@ -75,6 +75,9 @@ export interface Constraint {
   periods?: number[]; // TEACHER_BUSY: blocked periods of the day
   subjectId?: string; // NO_FIRST_PERIOD: subject that cannot be the first lesson
   groupId?: string; // NO_FIRST_PERIOD: optional scope (all groups when empty)
+  ruleId?: string; // FORBID_LESSON: the curriculum rule (lesson) this applies to
+  semester?: 1 | 2; // FORBID_LESSON: the semester whose hour count is being set
+  hours?: number; // FORBID_LESSON: hours distributed in that semester (0 = forbidden)
 }
 
 export interface Lesson {
