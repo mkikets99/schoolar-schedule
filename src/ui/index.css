@@ -1666,6 +1666,27 @@ tr.split-group + tr.split-group td {
   color: #666;
 }
 
+.checker-chip-sem {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #1f3d1f;
+  color: #7ee787;
+}
+
+.checker-chip.other-semester {
+  border-left-color: #ff6b6b;
+}
+
+.checker-chip.other-semester .checker-chip-sem {
+  background: #4d1f1f;
+  color: #ff9b9b;
+}
+
 .checker-empty {
   color: #666;
   font-style: italic;

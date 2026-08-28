@@ -7,14 +7,14 @@ import { Modal } from './Modal';
 import { InlineEditor } from './InlineEditor';
 import { SearchableSelect } from './SearchableSelect';
 import { analyzeEmptySlots } from '../services/scheduleAnalyzer';
-import { CurriculumRule, ScheduleResult } from '../../shared/types';
+import { CurriculumRule, ScheduleResult, SemesterSplit } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export const ScheduleViewer = () => {
   const { t } = useTranslation();
-  const { project, updateGeneratedSchedules, updateGeneratedSchedule } = useProject();
+  const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
   const [editMode, setEditMode] = useState(false);
   const scheduleResult = project?.generatedSchedules
@@ -303,13 +303,14 @@ export const ScheduleViewer = () => {
   const isLocked = (lessonId: string) => lockedLessons.has(lessonId);
   const isConflict = (lessonId: string) => conflictKeys.has(lessonId);
 
-  const handleEditorSave = (result: ScheduleResult) => {
+  const handleEditorSave = (result: ScheduleResult, splits?: SemesterSplit[]) => {
     if (!project) return;
     if (project.generatedSchedules) {
       updateGeneratedSchedules({ ...project.generatedSchedules, [activeSemester]: result });
     } else {
       updateGeneratedSchedule(result);
     }
+    if (splits) updateGeneratedSplits(splits);
   };
 
   const hasSchedule = schedule.length > 0;

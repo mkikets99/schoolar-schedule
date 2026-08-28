@@ -179,3 +179,70 @@ describe('InlineEditor', () => {
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A (1)');
   });
 });
+
+describe('InlineEditor two-semester shared pool', () => {
+  const makeTwoSemesterProject = (): ProjectState => {
+    const base = makeProject();
+    return {
+      ...base,
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 3, teacherId: 't1', roomId: 'r1' },
+      ],
+      generatedSchedules: {
+        semester1: {
+          schedule: [
+            { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+            { id: 'l2', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 2 },
+          ],
+          conflicts: [],
+          score: 1,
+        },
+        semester2: {
+          schedule: [
+            { id: 'l3', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 1 },
+          ],
+          conflicts: [],
+          score: 1,
+        },
+      },
+      generatedSplits: [
+        { ruleId: 'c1', hoursPerWeek: 3, first: 3, second: 3 },
+      ],
+    };
+  };
+
+  it('aggregates unassigned lessons from both semesters into one pool', () => {
+    const { container } = render(
+      <InlineEditor project={makeTwoSemesterProject()} activeSemester="semester1" onSave={vi.fn()} />
+    );
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(3);
+    // 2 of the 3 missing lessons belong to the other (semester 2) schedule.
+    expect(container.querySelectorAll('.checker-chip.other-semester').length).toBe(2);
+  });
+
+  it('shifts one hour to the edited semester when an other-semester lesson is placed', () => {
+    const onSave = vi.fn();
+    const { container } = render(
+      <InlineEditor project={makeTwoSemesterProject()} activeSemester="semester1" onSave={onSave} />
+    );
+    const chip = container.querySelector('.checker-chip.other-semester')!;
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
+    vi.spyOn(dayTrack, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, width: 480, height: 50, right: 480, bottom: 50, x: 0, y: 0,
+      toJSON: () => ({}),
+    });
+    fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(3);
+
+    fireEvent.click(screen.getByText('editor_apply'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const splits = onSave.mock.calls[0][1] as any[];
+    expect(splits).toBeDefined();
+    const c1 = splits.find(s => s.ruleId === 'c1');
+    expect(c1.first).toBe(4);
+    expect(c1.second).toBe(2);
+  });
+});
