@@ -19,12 +19,71 @@ function unitSlotCount(unit: SchedulingUnit): number {
   return unit.type === 'double' ? 2 : 1;
 }
 
+// Small deterministic PRNG so each generation attempt explores a different
+// placement order while remaining reproducible for a given seed.
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleInPlace<T>(arr: T[], rng: () => number): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+}
+
+function countUnassigned(result: ScheduleResult): number {
+  return (result.conflicts || [])
+    .filter((c) => c?.type === 'UNASSIGNED_HOURS')
+    .reduce((sum, c) => sum + (c.missing ?? 1), 0);
+}
+
+// Higher is better. Placement completeness dominates; distribution quality only
+// breaks ties between otherwise-equally-complete schedules.
+function scoreAttempt(schedules: SemesterSchedules): number {
+  const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
+  const placed = (schedules.semester1.score + schedules.semester2.score) / 2;
+
+  const byTeacherDay = new Map<string, Map<string, number[]>>();
+  for (const sem of [schedules.semester1.schedule, schedules.semester2.schedule]) {
+    for (const lesson of sem as any[]) {
+      if (!lesson.teacherId) continue;
+      if (!byTeacherDay.has(lesson.teacherId)) byTeacherDay.set(lesson.teacherId, new Map());
+      const dmap = byTeacherDay.get(lesson.teacherId)!;
+      if (!dmap.has(lesson.day)) dmap.set(lesson.day, []);
+      dmap.get(lesson.day)!.push(lesson.period);
+    }
+  }
+  let distribution = 0;
+  for (const dmap of byTeacherDay.values()) {
+    for (const periods of dmap.values()) {
+      periods.sort((a, b) => a - b);
+      if (periods.length === 1) distribution -= 2;
+      for (let i = 1; i < periods.length; i++) {
+        const gap = periods[i] - periods[i - 1] - 1;
+        if (gap > 0) distribution -= gap;
+      }
+    }
+  }
+
+  return placed * 1000 - unassigned + distribution * 0.01;
+}
+
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
   const result = await runGenerate(project, emit);
   emit({ type: 'RESULT', payload: result });
 }
 
-async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
+async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void, rng?: () => number): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const allRooms = project.rooms || [];
 
@@ -179,6 +238,8 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     if (aa !== ab) return aa.localeCompare(ab);
     return a.lessons[0]?.id.localeCompare(b.lessons[0]?.id || '') || 0;
   });
+
+  if (rng) shuffleInPlace(units, rng);
 
   const schedule: any[] = [];
   const conflicts: any[] = [];
@@ -402,8 +463,8 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       if (ca !== cb) return cb - ca;
       const sa = gradeAdjacencyScore(unit, day, a);
       const sb = gradeAdjacencyScore(unit, day, b);
-      if (sa !== sb) return sb - sa;
-      return a - b;
+       if (sa !== sb) return sb - sa;
+       return (a - b) + (rng ? rng() - 0.5 : 0);
     });
   }
 
@@ -421,7 +482,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
         need: counts[di] >= maxDaily || !fits ? -999 : (targets[di] - counts[di]) + teacherDayBonus(unit, di),
       };
     });
-    dayScores.sort((a, b) => b.need - a.need);
+    dayScores.sort((a, b) => (b.need - a.need) || ((rng ? rng() : 0) - 0.5));
 
     let placed = false;
 
@@ -467,8 +528,6 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
       emit({ type: 'PROGRESS', payload: { progress } });
     }
   }
-
-  await sleep(200);
 
   const totalBatches = units.length;
   return {
@@ -549,55 +608,87 @@ function collectUnassigned(result: ScheduleResult): Map<string, number> {
 }
 
 export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void) {
-  const runScaled = async (semesterProject: ProjectState, from: number, to: number) => {
-    return runGenerate(semesterProject, (msg) => {
-      if (msg.type === 'PROGRESS') {
-        const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
-        emit({ type: 'PROGRESS', payload: { progress: from + Math.floor((p / 100) * (to - from)) } });
-      }
-    });
-  };
+  // Generate many candidate schedules and keep the one that places the most
+  // lessons while producing the tidyest teacher distribution.
+  const ATTEMPTS = 20;
 
-  let splits = computeSemesterSplits(project);
-  let semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
-  emit({ type: 'PROGRESS', payload: { progress: 50 } });
-  let semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+  async function generateAttempt(seed: number, progressBase: number, progressSpan: number) {
+    const rng = mulberry32(seed);
+    const runScaled = async (semesterProject: ProjectState) => {
+      return runGenerate(semesterProject, (msg) => {
+        if (msg.type === 'PROGRESS') {
+          const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
+          emit({ type: 'PROGRESS', payload: { progress: Math.round(progressBase + (p / 100) * progressSpan) } });
+        }
+      }, rng);
+    };
 
-  // Lessons that cannot be placed in one semester are moved to the other by
-  // adjusting the per-rule split (the annual hour total is preserved). We iterate
-  // so a lesson can cascade to whichever semester actually has room.
-  for (let iter = 0; iter < 4; iter++) {
-    const out1 = collectUnassigned(semester1);
-    const out2 = collectUnassigned(semester2);
-    if (out1.size === 0 && out2.size === 0) break;
+    let splits = computeSemesterSplits(project);
+    let cursor = progressBase;
+    const take = (portion: number) => {
+      cursor += portion * progressSpan;
+    };
 
-    const nextSplits = splits.map((s) => {
-      const movedFrom1 = out1.get(s.ruleId) || 0;
-      const movedFrom2 = out2.get(s.ruleId) || 0;
-      return {
-        ...s,
-        first: Math.max(0, s.first - movedFrom1 + movedFrom2),
-        second: Math.max(0, s.second - movedFrom2 + movedFrom1),
-      };
-    });
+    take(0.45);
+    let semester1 = await runScaled(buildSemesterProject(project, 1, splits));
+    take(0.45);
+    let semester2 = await runScaled(buildSemesterProject(project, 2, splits));
 
-    const changed = nextSplits.some(
-      (s, i) => s.first !== splits[i].first || s.second !== splits[i].second
-    );
-    if (!changed) break;
-    splits = nextSplits;
+    // Lessons that cannot be placed in one semester are moved to the other by
+    // adjusting the per-rule split (the annual hour total is preserved). We iterate
+    // so a lesson can cascade to whichever semester actually has room.
+    for (let iter = 0; iter < 4; iter++) {
+      const out1 = collectUnassigned(semester1);
+      const out2 = collectUnassigned(semester2);
+      if (out1.size === 0 && out2.size === 0) break;
 
-    semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
-    emit({ type: 'PROGRESS', payload: { progress: 50 } });
-    semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+      const nextSplits = splits.map((s) => {
+        const movedFrom1 = out1.get(s.ruleId) || 0;
+        const movedFrom2 = out2.get(s.ruleId) || 0;
+        return {
+          ...s,
+          first: Math.max(0, s.first - movedFrom1 + movedFrom2),
+          second: Math.max(0, s.second - movedFrom2 + movedFrom1),
+        };
+      });
+
+      const changed = nextSplits.some(
+        (s, i) => s.first !== splits[i].first || s.second !== splits[i].second
+      );
+      if (!changed) break;
+      splits = nextSplits;
+
+      take(0.05);
+      semester1 = await runScaled(buildSemesterProject(project, 1, splits));
+      take(0.05);
+      semester2 = await runScaled(buildSemesterProject(project, 2, splits));
+    }
+
+    return { schedules: { semester1, semester2 } as SemesterSchedules, splits };
+  }
+
+  let best: { schedules: SemesterSchedules; splits: SemesterSplit[]; quality: number } | null = null;
+
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const progressBase = Math.floor((attempt / ATTEMPTS) * 95);
+    const progressSpan = 95 / ATTEMPTS;
+    const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
+    const quality = scoreAttempt(candidate.schedules);
+    if (!best || quality > best.quality) {
+      best = { ...candidate, quality };
+    }
+    emit({ type: 'PROGRESS', payload: { progress: Math.floor(((attempt + 1) / ATTEMPTS) * 95) } });
   }
 
   emit({ type: 'PROGRESS', payload: { progress: 100 } });
 
-  const schedules: SemesterSchedules = { semester1, semester2 };
-  emit({ type: 'RESULT', payload: { schedules, splits } });
-}
-
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  emit({
+    type: 'RESULT',
+    payload: {
+      schedules: best!.schedules,
+      splits: best!.splits,
+      attempts: ATTEMPTS,
+      bestQuality: best!.quality,
+    },
+  });
 }

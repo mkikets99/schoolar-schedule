@@ -36,7 +36,8 @@ function AppContent() {
       } else if (type === 'PROGRESS') {
         setWorkerStatus(`${t('generating')} ${payload.progress}%`);
       } else if (type === 'RESULT') {
-        setWorkerStatus(t('schedule_generated'));
+        const attempts = payload?.attempts;
+        setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
         updateGeneratedSchedules(payload?.schedules);
         updateGeneratedSplits(payload?.splits);
       }

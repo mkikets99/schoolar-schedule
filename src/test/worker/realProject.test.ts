@@ -58,7 +58,7 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
     expect(res).toBeDefined();
     schedules = res!.payload.schedules;
     splits = res!.payload.splits;
-  });
+  }, 120000);
 
   it('loads a real project', () => {
     expect(project.teachers.length).toBeGreaterThan(0);
@@ -236,10 +236,13 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
         );
       }
 
-      if (overCapacityGroups.length > 0) {
-        expect(overCapacityGroups.length).toBeGreaterThan(0);
-      } else {
-        expect(missingTotal).toBeGreaterThan(0);
+      // The best-of-N run may fully place every lesson, so there is not always
+      // something to explain. When there are unassigned hours, assert each is
+      // diagnosed by the explanation logic.
+      expect(missingTotal).toBeGreaterThanOrEqual(0);
+      if (missingTotal > 0) {
+        expect(missingPerConflict.size).toBeGreaterThan(0);
+        expect([...missingPerConflict.values()].reduce((a, b) => a + b, 0)).toBe(missingTotal);
       }
     }
   });
