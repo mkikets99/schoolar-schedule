@@ -815,6 +815,15 @@ tr.unassigned {
   white-space: nowrap;
 }
 
+.detail-row.detail-mismatch {
+  border-color: #b8860b;
+  background-color: #2a2410;
+}
+
+.detail-row.detail-mismatch .detail-meta {
+  color: #e0b84a;
+}
+
 .detail-sub {
   flex-basis: 100%;
   font-size: 0.78rem;

@@ -47,9 +47,45 @@ function countUnassigned(result: ScheduleResult): number {
     .reduce((sum, c) => sum + (c.missing ?? 1), 0);
 }
 
-// Higher is better. Placement completeness dominates; distribution quality only
-// breaks ties between otherwise-equally-complete schedules.
-function scoreAttempt(schedules: SemesterSchedules): number {
+// Intended per-semester lesson load per teacher and per group. When an explicit
+// loadDistribution input exists it is used (hours are treated as the annual weekly
+// target, so each semester gets half); otherwise the curriculum splits are summed.
+function intendedLoads(
+  project: ProjectState,
+  splits: SemesterSplit[]
+): { teacher: Map<string, { s1: number; s2: number }>; group: Map<string, { s1: number; s2: number }> } {
+  const teacher = new Map<string, { s1: number; s2: number }>();
+  const group = new Map<string, { s1: number; s2: number }>();
+  const add = (m: Map<string, { s1: number; s2: number }>, id: string, first: number, second: number) => {
+    const cur = m.get(id) || { s1: 0, s2: 0 };
+    cur.s1 += first;
+    cur.s2 += second;
+    m.set(id, cur);
+  };
+
+  const ld = project.loadDistribution || [];
+  if (ld.length > 0) {
+    for (const l of ld) {
+      const half = l.hours / 2;
+      if (l.teacherId) add(teacher, l.teacherId, half, half);
+      if (l.groupId) add(group, l.groupId, half, half);
+    }
+  } else {
+    const splitMap = new Map(splits.map((s) => [s.ruleId, s]));
+    for (const rule of project.curriculum) {
+      const split = splitMap.get(rule.id);
+      if (!split) continue;
+      if (rule.teacherId) add(teacher, rule.teacherId, split.first, split.second);
+      add(group, rule.groupId, split.first, split.second);
+    }
+  }
+  return { teacher, group };
+}
+
+// Higher is better. Placement completeness dominates; distribution quality and
+// closeness to the intended load distribution only break ties between otherwise
+// equally-complete schedules.
+function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState): number {
   const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
   const placed = (schedules.semester1.score + schedules.semester2.score) / 2;
 
@@ -75,7 +111,37 @@ function scoreAttempt(schedules: SemesterSchedules): number {
     }
   }
 
-  return placed * 1000 - unassigned + distribution * 0.01;
+  // Penalize deviation between the intended load distribution and the lessons that
+  // were actually placed, so the best schedule is the one whose per-semester loads
+  // are closest to the configured distribution.
+  const intended = intendedLoads(project, splits);
+  const actualTeacher = new Map<string, { s1: number; s2: number }>();
+  const actualGroup = new Map<string, { s1: number; s2: number }>();
+  const tally = (sem: any[], isSem1: boolean) => {
+    for (const lesson of sem) {
+      if (lesson.teacherId) {
+        const t = actualTeacher.get(lesson.teacherId) || { s1: 0, s2: 0 };
+        if (isSem1) t.s1++; else t.s2++;
+        actualTeacher.set(lesson.teacherId, t);
+      }
+      const g = actualGroup.get(lesson.groupId) || { s1: 0, s2: 0 };
+      if (isSem1) g.s1++; else g.s2++;
+      actualGroup.set(lesson.groupId, g);
+    }
+  };
+  tally(schedules.semester1.schedule as any[], true);
+  tally(schedules.semester2.schedule as any[], false);
+  let deviation = 0;
+  for (const [id, t] of intended.teacher) {
+    const a = actualTeacher.get(id) || { s1: 0, s2: 0 };
+    deviation += Math.abs(t.s1 - a.s1) + Math.abs(t.s2 - a.s2);
+  }
+  for (const [id, g] of intended.group) {
+    const a = actualGroup.get(id) || { s1: 0, s2: 0 };
+    deviation += Math.abs(g.s1 - a.s1) + Math.abs(g.s2 - a.s2);
+  }
+
+  return placed * 1000 - unassigned + distribution * 0.01 - deviation * 0.01;
 }
 
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
@@ -673,7 +739,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     const progressBase = Math.floor((attempt / ATTEMPTS) * 95);
     const progressSpan = 95 / ATTEMPTS;
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
-    const quality = scoreAttempt(candidate.schedules);
+    const quality = scoreAttempt(candidate.schedules, candidate.splits, project);
     if (!best || quality > best.quality) {
       best = { ...candidate, quality };
     }

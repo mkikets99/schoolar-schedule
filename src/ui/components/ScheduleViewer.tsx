@@ -51,6 +51,8 @@ export const ScheduleViewer = () => {
   const [exportOpen, setExportOpen] = useState(false);
   const [unassignedOpen, setUnassignedOpen] = useState(false);
   const [gapsOpen, setGapsOpen] = useState(false);
+  const [teacherLoadOpen, setTeacherLoadOpen] = useState(false);
+  const [classLoadOpen, setClassLoadOpen] = useState(false);
 
   const days = DAYS;
   const allPeriods = ALL_PERIODS;
@@ -219,6 +221,62 @@ export const ScheduleViewer = () => {
     return rows;
   }, [displayedGroupIds, groupGaps, getGroupName, emptySlotReasons, t]);
 
+  const intendedLoadMap = (kind: 'teacher' | 'group'): Map<string, number> => {
+    const map = new Map<string, number>();
+    const add = (id: string, v: number) => map.set(id, (map.get(id) || 0) + v);
+    const ld = project?.loadDistribution || [];
+    if (ld.length > 0) {
+      for (const l of ld) {
+        const v = l.hours / 2;
+        if (kind === 'teacher' && l.teacherId) add(l.teacherId, v);
+        if (kind === 'group' && l.groupId) add(l.groupId, v);
+      }
+    } else {
+      const splitMap = new Map((project?.generatedSplits || []).map(s => [s.ruleId, s]));
+      for (const rule of project?.curriculum || []) {
+        const split = splitMap.get(rule.id);
+        if (!split) continue;
+        const v = activeSemester === 'semester1' ? split.first : split.second;
+        if (kind === 'teacher' && rule.teacherId) add(rule.teacherId, v);
+        if (kind === 'group') add(rule.groupId, v);
+      }
+    }
+    return map;
+  };
+
+  const teacherLoads = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const lesson of schedule) {
+      if (!lesson.teacherId) continue;
+      counts.set(lesson.teacherId, (counts.get(lesson.teacherId) || 0) + 1);
+    }
+    const intended = intendedLoadMap('teacher');
+    return teachers
+      .map(tc => ({
+        id: tc.id,
+        name: tc.name || tc.shortName || tc.id,
+        count: counts.get(tc.id) || 0,
+        intended: intended.get(tc.id) ?? null,
+      }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [schedule, teachers, project, activeSemester]);
+
+  const classLoads = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const lesson of schedule) {
+      counts.set(lesson.groupId, (counts.get(lesson.groupId) || 0) + 1);
+    }
+    const intended = intendedLoadMap('group');
+    return groups
+      .map(g => ({
+        id: g.id,
+        name: g.name || g.id,
+        count: counts.get(g.id) || 0,
+        intended: intended.get(g.id) ?? null,
+      }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [schedule, groups, project, activeSemester]);
+
   const exportContext = useMemo<ExportContext>(() => ({
     schedule,
     groupIds: groups.map(g => g.id),
@@ -317,6 +375,8 @@ export const ScheduleViewer = () => {
 
         {hasSchedule && (
           <div className="export-actions">
+            <button onClick={() => setTeacherLoadOpen(true)} className="export-btn">{t('teacher_load')}</button>
+            <button onClick={() => setClassLoadOpen(true)} className="export-btn">{t('class_load')}</button>
             <button onClick={() => setExportOpen(true)} className="export-btn">{t('export')}</button>
           </div>
         )}
@@ -470,6 +530,50 @@ export const ScheduleViewer = () => {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={teacherLoadOpen} onClose={() => setTeacherLoadOpen(false)} title={t('teacher_load_title', { semester: t(activeSemester) })}>
+        {teacherLoads.length === 0 ? (
+          <div className="detail-empty">{t('no_teachers')}</div>
+        ) : (
+          <div className="detail-list">
+            {teacherLoads.map((row) => (
+              <div key={row.id} className={`detail-row${row.intended != null && Math.abs(row.count - row.intended) > 0.5 ? ' detail-mismatch' : ''}`}>
+                <span className="detail-main">{row.name}</span>
+                <span className="detail-meta">
+                  {t('lessons_count', { count: row.count })}
+                  {row.intended != null && ` / ${t('intended_count', { count: Math.round(row.intended) })}`}
+                </span>
+              </div>
+            ))}
+            <div className="detail-row detail-total">
+              <span className="detail-main">{t('total')}</span>
+              <span className="detail-meta">{t('lessons_count', { count: teacherLoads.reduce((s, r) => s + r.count, 0) })}</span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={classLoadOpen} onClose={() => setClassLoadOpen(false)} title={t('class_load_title', { semester: t(activeSemester) })}>
+        {classLoads.length === 0 ? (
+          <div className="detail-empty">{t('no_groups')}</div>
+        ) : (
+          <div className="detail-list">
+            {classLoads.map((row) => (
+              <div key={row.id} className={`detail-row${row.intended != null && Math.abs(row.count - row.intended) > 0.5 ? ' detail-mismatch' : ''}`}>
+                <span className="detail-main">{row.name}</span>
+                <span className="detail-meta">
+                  {t('lessons_count', { count: row.count })}
+                  {row.intended != null && ` / ${t('intended_count', { count: Math.round(row.intended) })}`}
+                </span>
+              </div>
+            ))}
+            <div className="detail-row detail-total">
+              <span className="detail-main">{t('total')}</span>
+              <span className="detail-meta">{t('lessons_count', { count: classLoads.reduce((s, r) => s + r.count, 0) })}</span>
+            </div>
           </div>
         )}
       </Modal>

@@ -276,5 +276,11 @@
   "empty_slot_room_busy": "The preferred room is occupied at this time",
   "empty_slot_no_first": "These subjects cannot be the first lesson",
   "empty_slot_day_balance": "Left empty to balance the daily load",
-  "gap_period_reason": "period {{period}}: {{reasons}}"
+  "gap_period_reason": "period {{period}}: {{reasons}}",
+  "teacher_load": "Teacher Load",
+  "class_load": "Class Load",
+  "teacher_load_title": "Teacher Load — {{semester}}",
+  "class_load_title": "Class Load — {{semester}}",
+  "lessons_count": "{{count}} lessons",
+  "intended_count": "intended {{count}}"
 }
