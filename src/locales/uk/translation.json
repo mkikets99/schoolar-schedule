@@ -242,6 +242,8 @@
   "need_periods": "Оберіть хоча б один період.",
   "need_subject": "Оберіть предмет.",
   "confirm_delete_constraint": "Ви впевнені, що хочете видалити це обмеження?",
+  "confirm_delete_selected_constraint": "Ви впевнені, що хочете видалити {{count}} вибраних обмежень?",
+  "confirm_delete_all_constraint": "Ви впевнені, що хочете видалити ВСІ {{count}} обмежень? Це не можна скасувати.",
   "unfilled_gaps": "Незаповнені вікна",
   "unfilled_gaps_desc": "Порожні слоти всередині дня класу, які неможливо заповнити.",
   "unassigned_details": "Нерозподілене навантаження",

@@ -2,6 +2,10 @@
   box-sizing: border-box;
 }
 
+tr.selected-row {
+  background: rgba(100, 108, 255, 0.12);
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;

@@ -39,6 +39,7 @@ export const ConstraintEditor = () => {
   const [forbidRuleId, setForbidRuleId] = useState('');
   const [forbidSemester, setForbidSemester] = useState<1 | 2>(1);
   const [forbidHours, setForbidHours] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const teacherName = (id?: string) => (id ? teachers.find(x => x.id === id)?.name || id : '');
   const subjectName = (id?: string) => (id ? subjects.find(x => x.id === id)?.name || id : '');
@@ -142,6 +143,45 @@ export const ConstraintEditor = () => {
     }
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allDisplayedSelected = displayed.length > 0 && displayed.every(c => selectedIds.has(c.id));
+
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allDisplayedSelected) {
+        displayed.forEach(c => next.delete(c.id));
+      } else {
+        displayed.forEach(c => next.add(c.id));
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    if (confirm(t('confirm_delete_selected_constraint', { count: selectedIds.size }))) {
+      updateConstraints(constraints.filter(c => !selectedIds.has(c.id)));
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleDeleteAll = () => {
+    if (constraints.length === 0) return;
+    if (confirm(t('confirm_delete_all_constraint', { count: constraints.length }))) {
+      updateConstraints([]);
+      setSelectedIds(new Set());
+    }
+  };
+
   const canAdd = teachers.length > 0 || subjects.length > 0;
 
   return (
@@ -149,6 +189,18 @@ export const ConstraintEditor = () => {
       <div className="view-header">
         <h2>{t('constraints')}</h2>
         <div className="header-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+          {constraints.length > 0 && (
+            <>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={selectedIds.size === 0}
+                className="delete-btn"
+              >
+                {t('delete_selected')}{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+              </button>
+              <button onClick={handleDeleteAll} className="delete-btn">{t('delete_all')}</button>
+            </>
+          )}
           <button onClick={() => setBusyOpen(true)} className="secondary-btn" disabled={teachers.length === 0}>{t('add_teacher_busy')}</button>
           <button onClick={() => setFirstOpen(true)} className="primary-btn" disabled={subjects.length === 0}>{t('add_no_first_period')}</button>
           <button onClick={() => setForbidOpen(true)} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_forbid_lesson')}</button>
@@ -284,16 +336,34 @@ export const ConstraintEditor = () => {
       <table className="editor-table">
         <thead>
           <tr>
+            <th style={{ width: '40px' }}>
+              <input
+                type="checkbox"
+                checked={allDisplayedSelected}
+                onChange={toggleSelectAll}
+                disabled={displayed.length === 0}
+                title={t('select_all_displayed')}
+              />
+            </th>
+            <th style={{ width: '40px' }}>#</th>
             <SortableTh label={t('constraint_type')} sortKey="kind" sort={sort} onSort={toggleSort} style={{ width: '180px' }} />
             <SortableTh label={t('details')} sortKey="details" sort={sort} onSort={toggleSort} />
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
-          {displayed.map(c => {
+          {displayed.map((c, index) => {
             const meta = KIND_KEYS[c.kind];
             return (
-              <tr key={c.id}>
+              <tr key={c.id} className={selectedIds.has(c.id) ? 'selected-row' : ''}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSelect(c.id)}
+                  />
+                </td>
+                <td>{index + 1}</td>
                 <td>
                   <span className={`constraint-badge ${meta?.badgeClass || ''}`}>{t(meta?.labelKey || '')}</span>
                 </td>
@@ -306,7 +376,7 @@ export const ConstraintEditor = () => {
           })}
           {displayed.length === 0 && (
             <tr>
-              <td colSpan={3} className="empty-row">{constraints.length === 0 ? t('no_constraints') : t('no_results')}</td>
+              <td colSpan={5} className="empty-row">{constraints.length === 0 ? t('no_constraints') : t('no_results')}</td>
             </tr>
           )}
         </tbody>
