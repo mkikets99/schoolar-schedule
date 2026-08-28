@@ -275,5 +275,11 @@
   "empty_slot_room_busy": "Бажаний клас зайнятий у цей час",
   "empty_slot_no_first": "Ці предмети не можуть бути першим уроком",
   "empty_slot_day_balance": "Залишено порожнім для балансування навантаження",
-  "gap_period_reason": "період {{period}}: {{reasons}}"
+  "gap_period_reason": "період {{period}}: {{reasons}}",
+  "teacher_load": "Навантаження вчителів",
+  "class_load": "Навантаження класів",
+  "teacher_load_title": "Навантаження вчителів — {{semester}}",
+  "class_load_title": "Навантаження класів — {{semester}}",
+  "lessons_count": "{{count}} уроків",
+  "intended_count": "заплановано {{count}}"
 }
