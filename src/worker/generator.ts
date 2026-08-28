@@ -1,4 +1,4 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, computeGroupScheduleConfig, GroupScheduleConfig } from '../shared/types';
 
 interface LessonStub {
   id: string;
@@ -19,12 +19,6 @@ function unitSlotCount(unit: SchedulingUnit): number {
   return unit.type === 'double' ? 2 : 1;
 }
 
-interface GroupScheduleConfig {
-  periodStart: number;
-  periodEnd: number;
-  maxDaily: number;
-}
-
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
   const result = await runGenerate(project, emit);
   emit({ type: 'RESULT', payload: result });
@@ -36,13 +30,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
 
   const groupConfig = new Map<string, GroupScheduleConfig>();
   for (const group of project.groups || []) {
-    const maxDaily = group.maxDailyLessons ?? 8;
-    const availableSlots = (group.periodEnd ?? 8) - (group.periodStart ?? 1) + 1;
-    groupConfig.set(group.id, {
-      periodStart: group.periodStart ?? 1,
-      periodEnd: group.periodEnd ?? 8,
-      maxDaily: Math.min(maxDaily, availableSlots),
-    });
+    groupConfig.set(group.id, computeGroupScheduleConfig(group));
   }
 
   const groupGrade = new Map<string, number>();

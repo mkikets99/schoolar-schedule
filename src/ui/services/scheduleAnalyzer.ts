@@ -1,4 +1,4 @@
-import { Lesson, ProjectState, CurriculumRule } from '../../shared/types';
+import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig } from '../../shared/types';
 
 export const CONFLICT_REASON = {
   TEACHER_SLOT: 'conflict_teacher_slot',
@@ -119,9 +119,9 @@ export function analyzeEmptySlots(
   const ruleById = new Map((project.curriculum || []).map(r => [r.id, r]));
 
   for (const group of project.groups || []) {
-    const start = group.periodStart ?? 1;
-    const end = group.periodEnd ?? 8;
-    const maxDaily = group.maxDailyLessons ?? 8;
+    const { periodStart, periodEnd, maxDaily } = computeGroupScheduleConfig(group);
+    const start = periodStart;
+    const end = periodEnd;
 
     const groupRules: CurriculumRule[] = [];
     for (const ruleId of pendingByRule.keys()) {
@@ -280,8 +280,9 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
     const group = groupMap.get(lesson.groupId);
     if (!group) continue;
 
-    const start = group.periodStart ?? 1;
-    const end = group.periodEnd ?? 8;
+    const { periodStart, periodEnd } = computeGroupScheduleConfig(group);
+    const start = periodStart;
+    const end = periodEnd;
     if (lesson.period < start) add(lesson.id, CONFLICT_REASON.OUT_OF_RANGE);
     if (lesson.period > end) add(lesson.id, CONFLICT_REASON.OUT_OF_RANGE);
 
@@ -302,7 +303,7 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
   }
 
   for (const [groupId, slots] of dailySlots) {
-    const maxDaily = groupMap.get(groupId)?.maxDailyLessons ?? 8;
+    const maxDaily = computeGroupScheduleConfig(groupMap.get(groupId)).maxDaily;
     const perDay = new Map<string, number>();
     for (const key of slots) {
       const day = key.slice(0, key.indexOf('|'));

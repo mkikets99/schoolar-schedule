@@ -357,7 +357,9 @@ describe('analyzeEmptySlots', () => {
   });
 
   it('reports a busy preferred room', () => {
-    const project = ruleA();
+    const project = ruleA({
+      groups: [{ id: 'g1', name: '5-A', grade: 5, subgroups: [], periodStart: 1, periodEnd: 6, maxDailyLessons: 5 }],
+    });
     const placed = [lesson('l2', 'g2', 'subj2', 'Monday', 4, { teacherId: 't2', roomId: 'r1' })];
     const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
     const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
@@ -374,8 +376,11 @@ describe('analyzeEmptySlots', () => {
     expect(reasons.get('g1|Monday|1')).toContain(EMPTY_SLOT_REASON.NO_FIRST);
   });
 
-  it('reports the daily lesson cap', () => {
-    const project = ruleA();
+  it('enforces the daily lesson limit via the scheduling window (no slot beyond maxDailyLessons)', () => {
+    // maxDailyLessons=3 anchored at periodStart=1 -> window is periods 1..3
+    const project = ruleA({
+      groups: [{ id: 'g1', name: '5-A', grade: 5, subgroups: [], periodStart: 1, periodEnd: 8, maxDailyLessons: 3 }],
+    });
     const placed = [
       lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'x1', teacherId: 't1', roomId: 'r1' }),
       lesson('l2', 'g1', 'subj2', 'Monday', 2, { ruleId: 'x2', teacherId: 't2', roomId: 'r1' }),
@@ -383,7 +388,10 @@ describe('analyzeEmptySlots', () => {
     ];
     const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
     const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
-    expect(reasons.get('g1|Monday|4')).toContain(EMPTY_SLOT_REASON.DAILY_CAP);
+    // period 4 is outside the derived window [1..3], so it is not a reportable slot
+    expect(reasons.get('g1|Monday|4')).toBeUndefined();
+    // a still-free in-window slot is reported with the day-balance reason
+    expect(reasons.get('g1|Tuesday|1')).toContain(EMPTY_SLOT_REASON.DAY_BALANCE);
   });
 
   it('reports day-balance when a free slot was skipped by the generator', () => {

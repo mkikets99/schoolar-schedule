@@ -106,6 +106,30 @@ export interface SemesterSchedules {
   semester2: ScheduleResult;
 }
 
+export interface GroupScheduleConfig {
+  periodStart: number;
+  periodEnd: number;
+  maxDaily: number;
+}
+
+/**
+ * Resolve a group's effective scheduling window.
+ *
+ * `maxDailyLessons` is interpreted as the number of lessons per day, anchored at
+ * the start of the shift. The latest lesson therefore ends at
+ * `periodStart + maxDailyLessons - 1`. The shift's own `periodEnd` is the hard
+ * upper bound and can only reduce the window.
+ */
+export function computeGroupScheduleConfig(group: Partial<Group> | undefined): GroupScheduleConfig {
+  const periodStart = group?.periodStart ?? 1;
+  const shiftEnd = group?.periodEnd ?? 8;
+  const maxDaily = group?.maxDailyLessons ?? 8;
+  const derivedEnd = periodStart + maxDaily - 1;
+  const periodEnd = Math.min(shiftEnd, derivedEnd);
+  const cappedMax = Math.min(maxDaily, periodEnd - periodStart + 1);
+  return { periodStart, periodEnd, maxDaily: cappedMax };
+}
+
 export interface ProjectState {
   version: string;
   school: School;
