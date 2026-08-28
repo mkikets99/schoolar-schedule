@@ -1,4 +1,4 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, computeGroupScheduleConfig, GroupScheduleConfig } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig } from '../shared/types';
 
 interface LessonStub {
   id: string;
@@ -538,9 +538,17 @@ export function buildSemesterProject(
   return { ...project, curriculum };
 }
 
-export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void) {
-  const splits = computeSemesterSplits(project);
+function collectUnassigned(result: ScheduleResult): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const conflict of result.conflicts || []) {
+    if (conflict?.type === 'UNASSIGNED_HOURS' && conflict.ruleId) {
+      map.set(conflict.ruleId, (map.get(conflict.ruleId) || 0) + (conflict.missing ?? 1));
+    }
+  }
+  return map;
+}
 
+export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void) {
   const runScaled = async (semesterProject: ProjectState, from: number, to: number) => {
     return runGenerate(semesterProject, (msg) => {
       if (msg.type === 'PROGRESS') {
@@ -550,9 +558,40 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     });
   };
 
-  const semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
+  let splits = computeSemesterSplits(project);
+  let semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
   emit({ type: 'PROGRESS', payload: { progress: 50 } });
-  const semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+  let semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+
+  // Lessons that cannot be placed in one semester are moved to the other by
+  // adjusting the per-rule split (the annual hour total is preserved). We iterate
+  // so a lesson can cascade to whichever semester actually has room.
+  for (let iter = 0; iter < 4; iter++) {
+    const out1 = collectUnassigned(semester1);
+    const out2 = collectUnassigned(semester2);
+    if (out1.size === 0 && out2.size === 0) break;
+
+    const nextSplits = splits.map((s) => {
+      const movedFrom1 = out1.get(s.ruleId) || 0;
+      const movedFrom2 = out2.get(s.ruleId) || 0;
+      return {
+        ...s,
+        first: Math.max(0, s.first - movedFrom1 + movedFrom2),
+        second: Math.max(0, s.second - movedFrom2 + movedFrom1),
+      };
+    });
+
+    const changed = nextSplits.some(
+      (s, i) => s.first !== splits[i].first || s.second !== splits[i].second
+    );
+    if (!changed) break;
+    splits = nextSplits;
+
+    semester1 = await runScaled(buildSemesterProject(project, 1, splits), 2, 48);
+    emit({ type: 'PROGRESS', payload: { progress: 50 } });
+    semester2 = await runScaled(buildSemesterProject(project, 2, splits), 52, 95);
+  }
+
   emit({ type: 'PROGRESS', payload: { progress: 100 } });
 
   const schedules: SemesterSchedules = { semester1, semester2 };

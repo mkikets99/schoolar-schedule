@@ -42,7 +42,7 @@ export const ScheduleViewer = () => {
     }, 0);
   }, [project, activeSemester]);
   const assignedHours = schedule.length;
-  const unassignedHours = neededHours - assignedHours;
+  const unassignedHours = Math.max(0, neededHours - assignedHours);
   const score = scheduleResult?.score ?? 0;
 
   const [filterType, setFilterType] = useState<'group' | 'teacher' | 'subject' | 'all'>('all');

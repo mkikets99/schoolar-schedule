@@ -133,4 +133,36 @@ describe('generateSemesterSchedules', () => {
     expect(s1Count).toBe(7); // 5 + ceil(1.5)
     expect(s2Count).toBe(6); // 5 + floor(1.5)
   });
+
+  it('moves lessons that do not fit in one semester into the other semester', async () => {
+    // g1 holds 5 lessons/week. c1 (4.5h) needs room r1; c2 (0.5h) also needs r1.
+    // Semester1 gets c1=5 + c2=1 = 6 lessons competing for 5 r1 slots, so c2
+    // cannot be placed. Semester2 gets c1=4, leaving a free r1 slot, so c2 must
+    // be moved into semester2 and placed there.
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 4.5, teacherId: 't1', roomId: 'r1' },
+      { id: 'c2', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 0.5, teacherId: 't2', roomId: 'r1' },
+    ]);
+    project.groups = [{ id: 'g1', name: '10-A', grade: 10, subgroups: [], periodStart: 1, periodEnd: 5, maxDailyLessons: 1 }];
+    project.rooms = [{ id: 'r1', name: 'Lab', types: ['lab'] }];
+
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+    const s1 = payload.schedules.semester1.schedule;
+    const s2 = payload.schedules.semester2.schedule;
+
+    // c2 (0.5h) was moved out of semester1 and placed in semester2.
+    expect(s1.some((l: any) => l.ruleId === 'c2')).toBe(false);
+    expect(s2.some((l: any) => l.ruleId === 'c2')).toBe(true);
+
+    // No lesson is left unplaced overall.
+    const unassigned = [
+      ...payload.schedules.semester1.conflicts,
+      ...payload.schedules.semester2.conflicts,
+    ].filter((c: any) => c.type === 'UNASSIGNED_HOURS');
+    const missing = unassigned.reduce((sum: number, c: any) => sum + (c.missing ?? 1), 0);
+    expect(missing).toBe(0);
+  });
 });
