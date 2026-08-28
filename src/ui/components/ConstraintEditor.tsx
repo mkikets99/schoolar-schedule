@@ -40,6 +40,7 @@ export const ConstraintEditor = () => {
   const [forbidSemester, setForbidSemester] = useState<1 | 2>(1);
   const [forbidHours, setForbidHours] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [editId, setEditId] = useState<string | null>(null);
 
   const teacherName = (id?: string) => (id ? teachers.find(x => x.id === id)?.name || id : '');
   const subjectName = (id?: string) => (id ? subjects.find(x => x.id === id)?.name || id : '');
@@ -62,6 +63,42 @@ export const ConstraintEditor = () => {
     }
     const scope = c.groupId ? `${groupName(c.groupId)} · ` : '';
     return `${scope}${subjectName(c.subjectId)} — ${t('cannot_be_first_period')}`;
+  };
+
+  const sameConstraint = (a: Constraint, b: Constraint): boolean => {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === 'TEACHER_BUSY') {
+      const ap = new Set(a.periods || []);
+      const bp = new Set(b.periods || []);
+      return a.teacherId === b.teacherId && (a.day || '*') === (b.day || '*') &&
+        ap.size === bp.size && [...ap].every(p => bp.has(p));
+    }
+    if (a.kind === 'NO_FIRST_PERIOD') {
+      return a.subjectId === b.subjectId && (a.groupId || '') === (b.groupId || '');
+    }
+    return a.ruleId === b.ruleId && a.semester === b.semester;
+  };
+
+  const findDuplicateConstraint = (draft: Constraint, ignoreId?: string): Constraint | undefined =>
+    constraints.find(c => c.id !== ignoreId && sameConstraint(c, draft));
+
+  const openEdit = (c: Constraint) => {
+    setEditId(c.id);
+    if (c.kind === 'TEACHER_BUSY') {
+      setBusyTeacherId(c.teacherId || '');
+      setBusyDay(c.day || '*');
+      setBusyPeriods(new Set(c.periods || []));
+      setBusyOpen(true);
+    } else if (c.kind === 'NO_FIRST_PERIOD') {
+      setFirstSubjectId(c.subjectId || '');
+      setFirstGroupId(c.groupId || '');
+      setFirstOpen(true);
+    } else {
+      setForbidRuleId(c.ruleId || '');
+      setForbidSemester(c.semester || 1);
+      setForbidHours(c.hours ?? 0);
+      setForbidOpen(true);
+    }
   };
 
   const { query, setQuery, sort, toggleSort, rows: displayed, total, shown } = useTableControls<Constraint>({
@@ -93,47 +130,65 @@ export const ConstraintEditor = () => {
   const handleAddBusy = () => {
     if (!busyTeacherId) { alert(t('need_teacher')); return; }
     if (busyPeriods.size === 0) { alert(t('need_periods')); return; }
-    const constraint: Constraint = {
-      id: crypto.randomUUID(),
+    const draft: Constraint = {
+      id: editId || crypto.randomUUID(),
       kind: 'TEACHER_BUSY',
       teacherId: busyTeacherId,
       day: busyDay,
       periods: [...busyPeriods],
     };
-    updateConstraints([...constraints, constraint]);
+    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
+    if (editId) {
+      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
+    } else {
+      updateConstraints([...constraints, draft]);
+    }
     setBusyTeacherId('');
     setBusyDay('*');
     setBusyPeriods(new Set());
+    setEditId(null);
     setBusyOpen(false);
   };
 
   const handleAddFirst = () => {
     if (!firstSubjectId) { alert(t('need_subject')); return; }
-    const constraint: Constraint = {
-      id: crypto.randomUUID(),
+    const draft: Constraint = {
+      id: editId || crypto.randomUUID(),
       kind: 'NO_FIRST_PERIOD',
       subjectId: firstSubjectId,
       groupId: firstGroupId || undefined,
     };
-    updateConstraints([...constraints, constraint]);
+    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
+    if (editId) {
+      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
+    } else {
+      updateConstraints([...constraints, draft]);
+    }
     setFirstSubjectId('');
     setFirstGroupId('');
+    setEditId(null);
     setFirstOpen(false);
   };
 
   const handleAddForbid = () => {
     if (!forbidRuleId) { alert(t('need_rule')); return; }
-    const constraint: Constraint = {
-      id: crypto.randomUUID(),
+    const draft: Constraint = {
+      id: editId || crypto.randomUUID(),
       kind: 'FORBID_LESSON',
       ruleId: forbidRuleId,
       semester: forbidSemester,
       hours: Math.max(0, Math.floor(forbidHours || 0)),
     };
-    updateConstraints([...constraints, constraint]);
+    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
+    if (editId) {
+      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
+    } else {
+      updateConstraints([...constraints, draft]);
+    }
     setForbidRuleId('');
     setForbidSemester(1);
     setForbidHours(0);
+    setEditId(null);
     setForbidOpen(false);
   };
 
@@ -201,9 +256,9 @@ export const ConstraintEditor = () => {
               <button onClick={handleDeleteAll} className="delete-btn">{t('delete_all')}</button>
             </>
           )}
-          <button onClick={() => setBusyOpen(true)} className="secondary-btn" disabled={teachers.length === 0}>{t('add_teacher_busy')}</button>
-          <button onClick={() => setFirstOpen(true)} className="primary-btn" disabled={subjects.length === 0}>{t('add_no_first_period')}</button>
-          <button onClick={() => setForbidOpen(true)} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_forbid_lesson')}</button>
+          <button onClick={() => { setEditId(null); setBusyOpen(true); }} className="secondary-btn" disabled={teachers.length === 0}>{t('add_teacher_busy')}</button>
+          <button onClick={() => { setEditId(null); setFirstOpen(true); }} className="primary-btn" disabled={subjects.length === 0}>{t('add_no_first_period')}</button>
+          <button onClick={() => { setEditId(null); setForbidOpen(true); }} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_forbid_lesson')}</button>
         </div>
       </div>
 
@@ -219,7 +274,7 @@ export const ConstraintEditor = () => {
         actions={
           <>
             <button onClick={() => setBusyOpen(false)} className="secondary-btn">{t('cancel')}</button>
-            <button onClick={handleAddBusy} className="primary-btn">{t('create')}</button>
+            <button onClick={handleAddBusy} className="primary-btn">{editId ? t('save') : t('create')}</button>
           </>
         }
       >
@@ -261,7 +316,7 @@ export const ConstraintEditor = () => {
         actions={
           <>
             <button onClick={() => setFirstOpen(false)} className="secondary-btn">{t('cancel')}</button>
-            <button onClick={handleAddFirst} className="primary-btn">{t('create')}</button>
+            <button onClick={handleAddFirst} className="primary-btn">{editId ? t('save') : t('create')}</button>
           </>
         }
       >
@@ -292,7 +347,7 @@ export const ConstraintEditor = () => {
         actions={
           <>
             <button onClick={() => setForbidOpen(false)} className="secondary-btn">{t('cancel')}</button>
-            <button onClick={handleAddForbid} className="primary-btn">{t('create')}</button>
+            <button onClick={handleAddForbid} className="primary-btn">{editId ? t('save') : t('create')}</button>
           </>
         }
       >
@@ -348,7 +403,7 @@ export const ConstraintEditor = () => {
             <th style={{ width: '40px' }}>#</th>
             <SortableTh label={t('constraint_type')} sortKey="kind" sort={sort} onSort={toggleSort} style={{ width: '180px' }} />
             <SortableTh label={t('details')} sortKey="details" sort={sort} onSort={toggleSort} />
-            <th style={{ width: '100px' }}>{t('actions')}</th>
+            <th style={{ width: '130px' }}>{t('actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -369,6 +424,7 @@ export const ConstraintEditor = () => {
                 </td>
                 <td>{getDetails(c)}</td>
                 <td>
+                  <button onClick={() => openEdit(c)} className="secondary-btn">{t('mode_edit')}</button>
                   <button onClick={() => handleDelete(c.id)} className="delete-btn">{t('delete')}</button>
                 </td>
               </tr>

@@ -73,6 +73,11 @@ export const CurriculumEditor = () => {
         teacherId: sg.teacherId || undefined,
         roomId: sg.roomId || undefined,
       }));
+      const hasDup = newRules.some(nr =>
+        findDuplicateRule(nr) ||
+        newRules.some(other => other !== nr && sameCurriculumRule(other, nr))
+      );
+      if (hasDup) { alert(t('duplicate_rule')); return; }
       updateCurriculum([...curriculum, ...newRules]);
     } else {
       const rule: CurriculumRule = {
@@ -84,6 +89,7 @@ export const CurriculumEditor = () => {
         roomId: newItem.roomId || undefined,
         doubleLesson: newItem.double || undefined,
       };
+      if (findDuplicateRule(rule)) { alert(t('duplicate_rule')); return; }
       updateCurriculum([...curriculum, rule]);
     }
 
@@ -104,6 +110,10 @@ export const CurriculumEditor = () => {
   };
 
   const handleUpdate = (id: string, updates: Partial<CurriculumRule>) => {
+    const current = curriculum.find(t => t.id === id);
+    if (!current) return;
+    const merged = { ...current, ...updates };
+    if (findDuplicateRule(merged, id)) { alert(t('duplicate_rule')); return; }
     updateCurriculum(curriculum.map(t => t.id === id ? { ...t, ...updates } : t));
   };
 
@@ -125,6 +135,16 @@ export const CurriculumEditor = () => {
     );
     return sameKey.length > 1 && sameKey[0].id !== item.id;
   };
+
+  const sameCurriculumRule = (a: CurriculumRule, b: CurriculumRule): boolean =>
+    a.groupId === b.groupId &&
+    a.subjectId === b.subjectId &&
+    (a.teacherId || '') === (b.teacherId || '') &&
+    (a.roomId || '') === (b.roomId || '') &&
+    !!a.doubleLesson === !!b.doubleLesson;
+
+  const findDuplicateRule = (draft: CurriculumRule, ignoreId?: string): CurriculumRule | undefined =>
+    curriculum.find(r => r.id !== ignoreId && sameCurriculumRule(r, draft));
 
   const { query, setQuery, sort, toggleSort, rows: displayedCurriculum, total, shown } = useTableControls<CurriculumRule>({
     rows: curriculum,

@@ -234,6 +234,8 @@
   "lesson": "Lesson",
   "forbid_lesson_hint": "Pick a lesson and a semester, then set how many hours are distributed to that semester. Set hours to 0 to forbid the lesson entirely in that semester.",
   "need_rule": "Select a lesson.",
+  "duplicate_constraint": "A constraint with these exact settings already exists.",
+  "duplicate_rule": "A curriculum rule with these exact settings already exists.",
   "select_rule": "Select lesson...",
   "every_day": "Every day",
   "select_teacher": "Select Teacher...",
