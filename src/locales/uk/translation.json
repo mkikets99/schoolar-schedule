@@ -297,5 +297,7 @@
   "teacher_load_title": "Навантаження вчителів — {{semester}}",
   "class_load_title": "Навантаження класів — {{semester}}",
   "lessons_count": "{{count}} уроків",
-  "intended_count": "заплановано {{count}}"
+  "intended_count": "заплановано {{count}}",
+  "editor_curriculum_distribution": "Необхідний розподіл навчального плану",
+  "needed_distribution_hint": "Уроки, які потребує навчальна програма на семестр. Рядки, не повністю розподілені в активному семестрі, виділено."
 }

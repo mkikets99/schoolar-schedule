@@ -178,6 +178,19 @@ describe('InlineEditor', () => {
     expect(container.querySelectorAll('.checker-chip').length).toBe(2);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A (1)');
   });
+
+  it('opens the needed curriculum distribution modal listing every entered rule', () => {
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    expect(container.querySelector('.modal-overlay')).toBeNull();
+    fireEvent.click(screen.getByText('editor_curriculum_distribution'));
+    const rows = Array.from(container.querySelectorAll('.detail-row'));
+    expect(rows.length).toBe(2);
+    expect(rows[0].querySelector('.detail-main')!.textContent).toContain('Math — 5-A');
+    expect(rows[1].querySelector('.detail-main')!.textContent).toContain('Math — 5-B');
+    // Active semester split is taken from the working splits.
+    expect(rows[0].querySelector('.detail-meta')!.textContent).toContain('semester_1');
+    expect(rows[0].querySelector('.detail-meta')!.textContent).toContain('semester_2');
+  });
 });
 
 describe('InlineEditor two-semester shared pool', () => {

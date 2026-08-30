@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { CurriculumRule, Lesson, ProjectState, ScheduleResult, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
 import { SearchableSelect } from './SearchableSelect';
+import { Modal } from './Modal';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -28,6 +29,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   const [poolSource, setPoolSource] = useState<Record<string, 'semester1' | 'semester2'>>({});
   const [workingSplits, setWorkingSplits] = useState<SemesterSplit[]>([]);
   const [hover, setHover] = useState<{ day: string; period: number } | null>(null);
+  const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string>(project.groups[0]?.id || '');
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
@@ -236,6 +238,39 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     [visibleGrid, activePool, project]
   );
 
+  // Needed curriculum distribution: for every entered curriculum rule, how many
+  // lessons each semester requires (from the working splits) and how many of the
+  // active semester's are already placed / still in the unassigned pool.
+  const distributionRows = useMemo(() => {
+    const placedByRule = new Map<string, number>();
+    for (const lesson of gridLessons) {
+      placedByRule.set(lesson.ruleId, (placedByRule.get(lesson.ruleId) || 0) + 1);
+    }
+    const unassignedByRule = new Map<string, number>();
+    for (const lesson of activePool) {
+      unassignedByRule.set(lesson.ruleId, (unassignedByRule.get(lesson.ruleId) || 0) + 1);
+    }
+    const rows = (project.curriculum || []).map(rule => {
+      const split = workingSplits.find(s => s.ruleId === rule.id);
+      const first = split?.first ?? Math.ceil(rule.hoursPerWeek);
+      const second = split?.second ?? Math.ceil(rule.hoursPerWeek);
+      return {
+        ruleId: rule.id,
+        groupName: getGroupName(rule.groupId),
+        subjectName: getSubject(rule.subjectId)?.name || '???',
+        teacherName: getTeacherName(rule.teacherId),
+        hours: rule.hoursPerWeek,
+        first,
+        second,
+        activeNeeded: activeSemester === 'semester1' ? first : second,
+        placed: placedByRule.get(rule.id) || 0,
+        unassigned: unassignedByRule.get(rule.id) || 0,
+      };
+    });
+    rows.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.subjectName.localeCompare(b.subjectName));
+    return rows;
+  }, [project, workingSplits, activeSemester, gridLessons, activePool, getGroupName, getSubject, getTeacherName]);
+
   const lessonsBySlot = useMemo(() => {
     const map = new Map<string, Lesson[]>();
     for (const lesson of visibleGrid) {
@@ -348,6 +383,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
           onChange={setSelectedGroupId}
           options={groups.map(g => ({ value: g.id, label: g.name }))}
         />
+        <button className="export-btn" onClick={() => setCurriculumOpen(true)}>{t('editor_curriculum_distribution')}</button>
         <button className="export-btn" onClick={undo} disabled={historyRef.current.length === 0}>{t('editor_undo')}</button>
         <button className="export-btn" onClick={handleApply}>{t('editor_apply')}</button>
         <button className="export-btn" onClick={handleReset}>{t('editor_reset')}</button>
@@ -435,6 +471,31 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
           )}
         </div>
       </div>
+
+      <Modal isOpen={curriculumOpen} onClose={() => setCurriculumOpen(false)} title={t('editor_curriculum_distribution')}>
+        <p className="editor-hint">{t('needed_distribution_hint')}</p>
+        {distributionRows.length === 0 ? (
+          <div className="detail-empty">{t('no_rules')}</div>
+        ) : (
+          <div className="detail-list">
+            {distributionRows.map(row => (
+              <div key={row.ruleId} className={`detail-row${row.placed !== row.activeNeeded ? ' detail-mismatch' : ''}`}>
+                <span className="detail-main">
+                  {row.subjectName} — {row.groupName}
+                  {row.teacherName && <span> ({row.teacherName})</span>}
+                </span>
+                <span className="detail-meta">
+                  {t('semester_1')}: {row.first} • {t('semester_2')}: {row.second} • {t('hrs_wk')}: {row.hours}
+                </span>
+                <div className="detail-sub">
+                  {t('editor_assigned_count', { assigned: row.placed, needed: row.activeNeeded })}
+                  {row.unassigned > 0 && ` • ${t('editor_unassigned')}: ${row.unassigned}`}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
