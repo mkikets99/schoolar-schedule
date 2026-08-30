@@ -193,6 +193,42 @@ describe('InlineEditor', () => {
   });
 });
 
+describe('InlineEditor teacher edit mode', () => {
+  it('shows only the selected teacher lessons across all classes', () => {
+    const { container } = render(
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+    );
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Anna');
+  });
+
+  it('switching the teacher selector shows that teacher lessons', () => {
+    const { container } = render(
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+    );
+    fireEvent.click(container.querySelector('.inline-editor-toolbar .combobox-trigger')!);
+    const option = Array.from(container.querySelectorAll('.combobox-option')).find(
+      el => el.getAttribute('data-value') === 't2'
+    )!;
+    fireEvent.click(option);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Bohdan');
+    const lesson = container.querySelector('.timeline-lesson')!;
+    expect((lesson as HTMLElement).title).not.toContain('Anna');
+  });
+
+  it('lists only the selected teacher rules in the curriculum distribution modal', () => {
+    const { container } = render(
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+    );
+    fireEvent.click(screen.getByText('editor_curriculum_distribution'));
+    const rows = Array.from(container.querySelectorAll('.detail-row'));
+    expect(rows.length).toBe(1);
+    expect(rows[0].querySelector('.detail-meta')!.textContent).toContain('2');
+  });
+});
+
 describe('InlineEditor two-semester shared pool', () => {
   const makeTwoSemesterProject = (): ProjectState => {
     const base = makeProject();

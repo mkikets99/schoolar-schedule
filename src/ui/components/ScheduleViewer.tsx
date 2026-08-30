@@ -16,7 +16,7 @@ export const ScheduleViewer = () => {
   const { t } = useTranslation();
   const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
-  const [editMode, setEditMode] = useState(false);
+  const [editMode, setEditMode] = useState<'view' | 'group' | 'teacher'>('view');
   const scheduleResult = project?.generatedSchedules
     ? project.generatedSchedules[activeSemester]
     : project?.generatedSchedule;
@@ -336,11 +336,12 @@ export const ScheduleViewer = () => {
         </div>
 
         <div className="mode-toggle">
-          <button className={`mode-btn ${!editMode ? 'active' : ''}`} onClick={() => setEditMode(false)}>{t('mode_view')}</button>
-          <button className={`mode-btn ${editMode ? 'active' : ''}`} onClick={() => setEditMode(true)} disabled={!hasSchedule}>{t('mode_edit')}</button>
+          <button className={`mode-btn ${editMode === 'view' ? 'active' : ''}`} onClick={() => setEditMode('view')}>{t('mode_view')}</button>
+          <button className={`mode-btn ${editMode === 'group' ? 'active' : ''}`} onClick={() => setEditMode('group')} disabled={!hasSchedule}>{t('mode_edit')}</button>
+          <button className={`mode-btn ${editMode === 'teacher' ? 'active' : ''}`} onClick={() => setEditMode('teacher')} disabled={!hasSchedule}>{t('mode_edit_teacher')}</button>
         </div>
 
-        {!editMode && (
+        {editMode === 'view' && (
           <>
             <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
               <option value="all">{t('all')}</option>
@@ -412,11 +413,12 @@ export const ScheduleViewer = () => {
 
       {!hasSchedule ? (
         <div className="no-selection">{t('generate_schedule_first')}</div>
-      ) : editMode && project ? (
+      ) : editMode !== 'view' && project ? (
         <InlineEditor
           project={project}
           activeSemester={activeSemester}
           onSave={handleEditorSave}
+          editMode={editMode}
         />
       ) : (
         <div className="schedule-grid-container">

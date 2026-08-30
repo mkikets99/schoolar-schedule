@@ -13,6 +13,7 @@ interface InlineEditorProps {
   project: ProjectState;
   activeSemester: 'semester1' | 'semester2';
   onSave: (result: ScheduleResult, splits?: SemesterSplit[]) => void;
+  editMode?: 'group' | 'teacher';
 }
 
 interface HistoryEntry {
@@ -22,7 +23,7 @@ interface HistoryEntry {
   splits: SemesterSplit[];
 }
 
-export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorProps) => {
+export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'group' }: InlineEditorProps) => {
   const { t } = useTranslation();
   const [gridLessons, setGridLessons] = useState<Lesson[]>([]);
   const [poolLessons, setPoolLessons] = useState<Lesson[]>([]);
@@ -31,6 +32,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   const [hover, setHover] = useState<{ day: string; period: number } | null>(null);
   const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string>(project.groups[0]?.id || '');
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(project.teachers[0]?.id || '');
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
 
@@ -41,6 +43,10 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   const getSubject = (id: string) => subjects.find(s => s.id === id);
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getTeacherName = (id?: string) => teachers.find(t => t.id === id)?.shortName || teachers.find(t => t.id === id)?.name || '';
+
+  const ruleById = useMemo(() => new Map((project.curriculum || []).map(r => [r.id, r])), [project.curriculum]);
+  const lessonTeacherId = (lesson: Lesson) => lesson.teacherId || ruleById.get(lesson.ruleId)?.teacherId;
+  const belongsToTeacher = (lesson: Lesson, teacherId: string) => lessonTeacherId(lesson) === teacherId;
 
   const makePending = (rule: CurriculumRule, id: string): Lesson => ({
     id,
@@ -217,20 +223,24 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   );
 
   const visibleGrid = useMemo(
-    () => gridLessons.filter(l => l.groupId === selectedGroupId),
-    [gridLessons, selectedGroupId]
+    () => gridLessons.filter(l =>
+      editMode === 'teacher' ? belongsToTeacher(l, selectedTeacherId) : l.groupId === selectedGroupId
+    ),
+    [gridLessons, selectedGroupId, selectedTeacherId, editMode, ruleById]
   );
   const visiblePool = useMemo(
-    () => poolLessons.filter(l => l.groupId === selectedGroupId),
-    [poolLessons, selectedGroupId]
+    () => poolLessons.filter(l =>
+      editMode === 'teacher' ? belongsToTeacher(l, selectedTeacherId) : l.groupId === selectedGroupId
+    ),
+    [poolLessons, selectedGroupId, selectedTeacherId, editMode, ruleById]
   );
   const visibleConflictCount = useMemo(
     () => new Set(
       visibleGrid
         .filter(l => (analysis.byLesson.get(l.id) || []).length > 0)
-        .map(l => `${l.groupId}|${l.subjectId}|${l.day}|${l.period}`)
+        .map(l => `${editMode === 'teacher' ? lessonTeacherId(l) : l.groupId}|${l.subjectId}|${l.day}|${l.period}`)
     ).size,
-    [visibleGrid, analysis]
+    [visibleGrid, analysis, editMode, lessonTeacherId]
   );
 
   const counts = useMemo(
@@ -250,7 +260,10 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     for (const lesson of activePool) {
       unassignedByRule.set(lesson.ruleId, (unassignedByRule.get(lesson.ruleId) || 0) + 1);
     }
-    const rows = (project.curriculum || []).map(rule => {
+    const rules = editMode === 'teacher'
+      ? (project.curriculum || []).filter(r => r.teacherId === selectedTeacherId)
+      : (project.curriculum || []);
+    const rows = rules.map(rule => {
       const split = workingSplits.find(s => s.ruleId === rule.id);
       const first = split?.first ?? Math.ceil(rule.hoursPerWeek);
       const second = split?.second ?? Math.ceil(rule.hoursPerWeek);
@@ -269,7 +282,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
     });
     rows.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.subjectName.localeCompare(b.subjectName));
     return rows;
-  }, [project, workingSplits, activeSemester, gridLessons, activePool, getGroupName, getSubject, getTeacherName]);
+  }, [project, workingSplits, activeSemester, gridLessons, activePool, getGroupName, getSubject, getTeacherName, editMode, selectedTeacherId]);
 
   const lessonsBySlot = useMemo(() => {
     const map = new Map<string, Lesson[]>();
@@ -376,13 +389,27 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
   return (
     <div className="inline-editor">
       <div className="inline-editor-toolbar">
-        <label className="editor-class-label">{t('group')}:</label>
-        <SearchableSelect
-          className="table-filter"
-          value={selectedGroupId}
-          onChange={setSelectedGroupId}
-          options={groups.map(g => ({ value: g.id, label: g.name }))}
-        />
+        {editMode === 'teacher' ? (
+          <>
+            <label className="editor-class-label">{t('teacher')}:</label>
+            <SearchableSelect
+              className="table-filter"
+              value={selectedTeacherId}
+              onChange={setSelectedTeacherId}
+              options={teachers.map(tc => ({ value: tc.id, label: tc.name || tc.shortName || tc.id }))}
+            />
+          </>
+        ) : (
+          <>
+            <label className="editor-class-label">{t('group')}:</label>
+            <SearchableSelect
+              className="table-filter"
+              value={selectedGroupId}
+              onChange={setSelectedGroupId}
+              options={groups.map(g => ({ value: g.id, label: g.name }))}
+            />
+          </>
+        )}
         <button className="export-btn" onClick={() => setCurriculumOpen(true)}>{t('editor_curriculum_distribution')}</button>
         <button className="export-btn" onClick={undo} disabled={historyRef.current.length === 0}>{t('editor_undo')}</button>
         <button className="export-btn" onClick={handleApply}>{t('editor_apply')}</button>
@@ -395,7 +422,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
         </span>
       </div>
 
-      <p className="editor-hint">{t('editor_hint')}</p>
+      <p className="editor-hint">{t(editMode === 'teacher' ? 'editor_hint_teacher' : 'editor_hint')}</p>
 
       <div className="inline-editor-body">
         <div className="timeline">
@@ -441,7 +468,7 @@ export const InlineEditor = ({ project, activeSemester, onSave }: InlineEditorPr
 
         <div className="checker-zone" onDragOver={(e) => e.preventDefault()} onDrop={handlePoolDrop}>
           <h4 className="checker-zone-title">
-            {t('editor_unassigned')} — {getGroupName(selectedGroupId)} ({counts.unassigned})
+            {t('editor_unassigned')} — {editMode === 'teacher' ? getTeacherName(selectedTeacherId) : getGroupName(selectedGroupId)} ({counts.unassigned})
           </h4>
           <p className="checker-zone-hint">{t('editor_checker_hint')}</p>
           {visiblePool.length === 0 ? (
