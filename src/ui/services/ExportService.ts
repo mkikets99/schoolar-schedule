@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import ExcelJS from 'exceljs';
 import type { TFunction } from 'i18next';
-import { Group, Teacher, Subject, Room, Lesson } from '../../shared/types';
+import { Group, Teacher, Subject, Room, Lesson, ProjectState, ScheduleResult } from '../../shared/types';
 import { ensureFonts } from '../../utils/pdfFonts';
 
 export type ExportFormat = 'pdf' | 'xlsx';
@@ -852,4 +852,88 @@ export async function exportReport(
   } else {
     await renderMatrixToXlsx(matrix, t);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Hidden developer export: dumps the generated schedule as plain JSON so the
+// result can be shared/inspected outside the app. Not surfaced in the UI.
+// ---------------------------------------------------------------------------
+
+export async function exportScheduleJSON(project: ProjectState): Promise<void> {
+  const subjectName = (id?: string) => project.subjects.find(s => s.id === id)?.name || '';
+  const teacherName = (id?: string) => project.teachers.find(t => t.id === id)?.name || '';
+  const roomName = (id?: string) => project.rooms.find(r => r.id === id)?.name || '';
+  const groupName = (id?: string) => project.groups.find(g => g.id === id)?.name || '';
+
+  const decorateLesson = (l: Lesson) => ({
+    id: l.id,
+    ruleId: l.ruleId,
+    day: l.day,
+    period: l.period,
+    groupId: l.groupId,
+    groupName: groupName(l.groupId),
+    subjectId: l.subjectId,
+    subjectName: subjectName(l.subjectId),
+    teacherId: l.teacherId,
+    teacherName: teacherName(l.teacherId),
+    roomId: l.roomId,
+    roomName: roomName(l.roomId),
+  });
+
+  const semesterBlock = (s: ScheduleResult | undefined) => ({
+    score: s?.score ?? 0,
+    assigned: s?.schedule?.length ?? 0,
+    lessons: (s?.schedule || []).map(decorateLesson),
+    conflicts: s?.conflicts || [],
+  });
+
+  const perDayTally = (lessons: Lesson[]) => {
+    const out: Record<string, Record<string, number>> = {};
+    for (const l of lessons) {
+      const g = groupName(l.groupId);
+      if (!out[g]) out[g] = {};
+      out[g][l.day] = (out[g][l.day] || 0) + 1;
+    }
+    return out;
+  };
+
+  const s1Source = project.generatedSchedules?.semester1 || (project.generatedSchedule ? project.generatedSchedule : undefined);
+  const s2Source = project.generatedSchedules?.semester2;
+
+  const payload = {
+    app: 'Schoolar Schedule',
+    projectVersion: project.version,
+    school: project.school.name,
+    exportedAt: new Date().toISOString(),
+    teachers: project.teachers.map(t => ({ id: t.id, name: t.name })),
+    subjects: project.subjects.map(s => ({ id: s.id, name: s.name })),
+    groups: project.groups.map(g => ({
+      id: g.id,
+      name: g.name,
+      grade: g.grade,
+      periodStart: g.periodStart ?? 1,
+      periodEnd: g.periodEnd ?? 8,
+      maxDailyLessons: g.maxDailyLessons ?? 8,
+    })),
+    constraints: project.constraints.map(c => ({ ...c })),
+    splits: project.generatedSplits || [],
+    semester1: semesterBlock(s1Source),
+    semester2: s2Source ? semesterBlock(s2Source) : undefined,
+    summary: {
+      lessonsPerGroupPerDay: {
+        semester1: perDayTally(s1Source?.schedule || []),
+        semester2: perDayTally(s2Source?.schedule || []),
+      },
+    },
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${project.school.name.replace(/\s+/g, '_')}_schedule.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

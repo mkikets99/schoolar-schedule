@@ -201,4 +201,53 @@ describe('generateSemesterSchedules', () => {
     expect(split.first).toBe(0);
     expect(split.second).toBe(10);
   });
+
+  it('never places a capped rule more than its per-day limit', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    project.constraints = [{ id: 'md', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 1 }];
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+
+    for (const semester of ['semester1', 'semester2'] as const) {
+      const lessons = payload.schedules[semester].schedule.filter((l: any) => l.ruleId === 'c1');
+      expect(lessons).toHaveLength(5);
+      const perDay = new Map<string, number>();
+      for (const l of lessons) perDay.set(l.day, (perDay.get(l.day) || 0) + 1);
+      for (const count of perDay.values()) expect(count).toBeLessThanOrEqual(1);
+    }
+
+    const unassigned = [
+      ...payload.schedules.semester1.conflicts,
+      ...payload.schedules.semester2.conflicts,
+    ].filter((c: any) => c.type === 'UNASSIGNED_HOURS');
+    expect(unassigned).toHaveLength(0);
+  });
+
+  it('splits a capped double-lesson rule into single days', async () => {
+    // A 4h double-lesson rule is 2 double units in a week. Capped at 1/day, the
+    // double rows cannot be placed together, so the generator falls back to
+    // placing each hour on its own day.
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 4, teacherId: 't1', doubleLesson: true },
+    ]);
+    project.constraints = [{ id: 'md', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 1 }];
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+
+    for (const semester of ['semester1', 'semester2'] as const) {
+      const lessons = payload.schedules[semester].schedule.filter((l: any) => l.ruleId === 'c1');
+      expect(lessons).toHaveLength(4);
+      const perDay = new Map<string, number>();
+      for (const l of lessons) perDay.set(l.day, (perDay.get(l.day) || 0) + 1);
+      for (const count of perDay.values()) expect(count).toBeLessThanOrEqual(1);
+      // No lesson shares a slot with another lesson of the same rule.
+      const bySlot = new Map<string, number>();
+      for (const l of lessons) bySlot.set(`${l.day}-${l.period}`, (bySlot.get(`${l.day}-${l.period}`) || 0) + 1);
+      for (const count of bySlot.values()) expect(count).toBeLessThanOrEqual(1);
+    }
+  });
 });

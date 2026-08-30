@@ -12,6 +12,7 @@ import { LoadDistributionUI } from './components/LoadDistributionUI';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
 import { exportProject } from './services/ProjectExportService';
+import { exportScheduleJSON } from './services/ExportService';
 import './index.css';
 
 function AppContent() {
@@ -50,6 +51,25 @@ function AppContent() {
       worker.terminate();
     };
   }, []);
+
+  useEffect(() => {
+    if (!project) return;
+    const exportJson = () => {
+      exportScheduleJSON(project).catch((err) => console.error('JSON export failed:', err));
+    };
+    (window as any).__exportScheduleJSON = exportJson;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        exportJson();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      delete (window as any).__exportScheduleJSON;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [project]);
 
   const [currentView, setCurrentView] = useState<'dashboard' | 'school' | 'teachers' | 'subjects' | 'rooms' | 'groups' | 'curriculum' | 'load' | 'schedule' | 'constraints'>('dashboard');
 

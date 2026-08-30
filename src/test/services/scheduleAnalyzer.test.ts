@@ -117,6 +117,34 @@ describe('analyzeSchedule', () => {
     expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.NO_FIRST);
   });
 
+  it('flags a rule that exceeds its max lessons-per-day limit', () => {
+    const project = makeProject({}, [
+      { id: 'c3', kind: 'MAX_DAILY_LESSONS', ruleId: 'rule-l1', maxPerDay: 1 },
+    ]);
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 2, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('l3', 'g1', 'subj2', 'Tuesday', 1, { ruleId: 'rule-l2', teacherId: 't2' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.DAILY_RULE);
+    expect(a.byLesson.get('l2')).toContain(CONFLICT_REASON.DAILY_RULE);
+    expect(a.byLesson.get('l3')).toBeUndefined();
+  });
+
+  it('does not flag a rule that stays within its daily limit', () => {
+    const project = makeProject({}, [
+      { id: 'c3', kind: 'MAX_DAILY_LESSONS', ruleId: 'rule-l1', maxPerDay: 2 },
+    ]);
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-l1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 2, { ruleId: 'rule-l1' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toBeUndefined();
+    expect(a.byLesson.get('l2')).toBeUndefined();
+  });
+
   it('does not flag no-first-period when not the first period', () => {
     const project = makeProject({}, [{ id: 'c2', kind: 'NO_FIRST_PERIOD', subjectId: 'subj1', groupId: 'g1' }]);
     const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 2)];
@@ -374,6 +402,21 @@ describe('analyzeEmptySlots', () => {
     const pool = [lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' })];
     const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
     expect(reasons.get('g1|Monday|1')).toContain(EMPTY_SLOT_REASON.NO_FIRST);
+  });
+
+  it('reports a rule that already hit its per-day limit as blocking the slot', () => {
+    const project = ruleA();
+    project.constraints = [{ id: 'c3', kind: 'MAX_DAILY_LESSONS', ruleId: 'rule-a', maxPerDay: 1 }];
+    const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-a' })];
+    const pool = [
+      lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' }),
+      lesson('p2', 'g1', 'subj1', '', 0, { ruleId: 'rule-a' }),
+    ];
+    const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
+    expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.DAILY_RULE);
+    expect(reasons.get('g1|Monday|2')).not.toContain(EMPTY_SLOT_REASON.DAY_BALANCE);
+    // the same rule is still allowed on a fresh day
+    expect(reasons.get('g1|Tuesday|1')).toContain(EMPTY_SLOT_REASON.DAY_BALANCE);
   });
 
   it('enforces the daily lesson limit via the scheduling window (no slot beyond maxDailyLessons)', () => {

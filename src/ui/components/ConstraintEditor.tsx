@@ -13,6 +13,7 @@ const KIND_KEYS: Record<ConstraintKind, { labelKey: string; badgeClass: string }
   TEACHER_BUSY: { labelKey: 'teacher_busy', badgeClass: 'teacher-busy' },
   NO_FIRST_PERIOD: { labelKey: 'no_first_period', badgeClass: 'no-first' },
   FORBID_LESSON: { labelKey: 'forbid_lesson', badgeClass: 'forbid-lesson' },
+  MAX_DAILY_LESSONS: { labelKey: 'max_daily_lessons', badgeClass: 'max-daily' },
 };
 
 export const ConstraintEditor = () => {
@@ -27,6 +28,7 @@ export const ConstraintEditor = () => {
   const [busyOpen, setBusyOpen] = useState(false);
   const [firstOpen, setFirstOpen] = useState(false);
   const [forbidOpen, setForbidOpen] = useState(false);
+  const [maxDailyOpen, setMaxDailyOpen] = useState(false);
   const [kindFilter, setKindFilter] = useState('');
 
   const [busyTeacherId, setBusyTeacherId] = useState('');
@@ -39,6 +41,8 @@ export const ConstraintEditor = () => {
   const [forbidRuleId, setForbidRuleId] = useState('');
   const [forbidSemester, setForbidSemester] = useState<1 | 2>(1);
   const [forbidHours, setForbidHours] = useState(0);
+  const [maxDailyRuleId, setMaxDailyRuleId] = useState('');
+  const [maxDailyPerDay, setMaxDailyPerDay] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -61,6 +65,9 @@ export const ConstraintEditor = () => {
     if (c.kind === 'FORBID_LESSON') {
       return `${ruleLabel(c.ruleId)} — ${t(c.semester === 2 ? 'semester_2' : 'semester_1')}: ${c.hours ?? 0} ${t('hrs_wk')}`;
     }
+    if (c.kind === 'MAX_DAILY_LESSONS') {
+      return `${ruleLabel(c.ruleId)} — ${t('at_most')} ${c.maxPerDay ?? 1} ${t(c.maxPerDay === 1 ? 'lesson_per_day' : 'lessons_per_day')}`;
+    }
     const scope = c.groupId ? `${groupName(c.groupId)} · ` : '';
     return `${scope}${subjectName(c.subjectId)} — ${t('cannot_be_first_period')}`;
   };
@@ -76,7 +83,10 @@ export const ConstraintEditor = () => {
     if (a.kind === 'NO_FIRST_PERIOD') {
       return a.subjectId === b.subjectId && (a.groupId || '') === (b.groupId || '');
     }
-    return a.ruleId === b.ruleId && a.semester === b.semester;
+    if (a.kind === 'FORBID_LESSON') {
+      return a.ruleId === b.ruleId && a.semester === b.semester;
+    }
+    return a.ruleId === b.ruleId && a.maxPerDay === b.maxPerDay;
   };
 
   const findDuplicateConstraint = (draft: Constraint, ignoreId?: string): Constraint | undefined =>
@@ -93,6 +103,10 @@ export const ConstraintEditor = () => {
       setFirstSubjectId(c.subjectId || '');
       setFirstGroupId(c.groupId || '');
       setFirstOpen(true);
+    } else if (c.kind === 'MAX_DAILY_LESSONS') {
+      setMaxDailyRuleId(c.ruleId || '');
+      setMaxDailyPerDay(c.maxPerDay ?? 1);
+      setMaxDailyOpen(true);
     } else {
       setForbidRuleId(c.ruleId || '');
       setForbidSemester(c.semester || 1);
@@ -192,6 +206,27 @@ export const ConstraintEditor = () => {
     setForbidOpen(false);
   };
 
+  const handleAddMaxDaily = () => {
+    if (!maxDailyRuleId) { alert(t('need_rule')); return; }
+    const perDay = Math.max(1, Math.floor(maxDailyPerDay || 0));
+    const draft: Constraint = {
+      id: editId || crypto.randomUUID(),
+      kind: 'MAX_DAILY_LESSONS',
+      ruleId: maxDailyRuleId,
+      maxPerDay: perDay,
+    };
+    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
+    if (editId) {
+      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
+    } else {
+      updateConstraints([...constraints, draft]);
+    }
+    setMaxDailyRuleId('');
+    setMaxDailyPerDay(1);
+    setEditId(null);
+    setMaxDailyOpen(false);
+  };
+
   const handleDelete = (id: string) => {
     if (confirm(t('confirm_delete_constraint'))) {
       updateConstraints(constraints.filter(c => c.id !== id));
@@ -259,6 +294,7 @@ export const ConstraintEditor = () => {
           <button onClick={() => { setEditId(null); setBusyOpen(true); }} className="secondary-btn" disabled={teachers.length === 0}>{t('add_teacher_busy')}</button>
           <button onClick={() => { setEditId(null); setFirstOpen(true); }} className="primary-btn" disabled={subjects.length === 0}>{t('add_no_first_period')}</button>
           <button onClick={() => { setEditId(null); setForbidOpen(true); }} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_forbid_lesson')}</button>
+          <button onClick={() => { setEditId(null); setMaxDailyOpen(true); }} className="secondary-btn" disabled={(project?.curriculum.length || 0) === 0}>{t('add_max_daily')}</button>
         </div>
       </div>
 
@@ -377,6 +413,37 @@ export const ConstraintEditor = () => {
         </FormField>
       </Modal>
 
+      <Modal
+        isOpen={maxDailyOpen}
+        onClose={() => setMaxDailyOpen(false)}
+        title={t('add_max_daily')}
+        actions={
+          <>
+            <button onClick={() => setMaxDailyOpen(false)} className="secondary-btn">{t('cancel')}</button>
+            <button onClick={handleAddMaxDaily} className="primary-btn">{editId ? t('save') : t('create')}</button>
+          </>
+        }
+      >
+        <p className="section-desc">{t('max_daily_hint')}</p>
+        <FormField label={t('lesson')}>
+          <SearchableSelect
+            value={maxDailyRuleId}
+            onChange={setMaxDailyRuleId}
+            options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
+            placeholder={t('select_rule')}
+            allowEmpty
+          />
+        </FormField>
+        <FormField label={t('max_per_day')}>
+          <input
+            type="number"
+            min={1}
+            value={maxDailyPerDay}
+            onChange={(e) => setMaxDailyPerDay(Number(e.target.value))}
+          />
+        </FormField>
+      </Modal>
+
       <div className="table-toolbar">
         <TableSearch value={query} onChange={setQuery} placeholder={t('search_placeholder')} />
         <select className="table-filter" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
@@ -384,6 +451,7 @@ export const ConstraintEditor = () => {
           <option value="TEACHER_BUSY">{t('teacher_busy')}</option>
           <option value="NO_FIRST_PERIOD">{t('no_first_period')}</option>
           <option value="FORBID_LESSON">{t('forbid_lesson')}</option>
+          <option value="MAX_DAILY_LESSONS">{t('max_daily_lessons')}</option>
         </select>
         <span className="table-count">{t('showing_count', { shown, total })}</span>
       </div>

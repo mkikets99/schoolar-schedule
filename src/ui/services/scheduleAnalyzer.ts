@@ -8,6 +8,7 @@ export const CONFLICT_REASON = {
   NO_FIRST: 'conflict_no_first_period',
   OUT_OF_RANGE: 'conflict_out_of_range',
   DAILY_OVERLOAD: 'conflict_daily_overload',
+  DAILY_RULE: 'conflict_daily_rule',
 } as const;
 
 export const EMPTY_SLOT_REASON = {
@@ -17,6 +18,7 @@ export const EMPTY_SLOT_REASON = {
   ROOM_BUSY: 'empty_slot_room_busy',
   NO_FIRST: 'empty_slot_no_first',
   DAY_BALANCE: 'empty_slot_day_balance',
+  DAILY_RULE: 'empty_slot_daily_rule',
 } as const;
 
 const DEFAULT_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -116,6 +118,20 @@ export function analyzeEmptySlots(
     }
   }
 
+  const maxDailyByRule = new Map<string, number>();
+  for (const c of project.constraints || []) {
+    if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
+      maxDailyByRule.set(c.ruleId, c.maxPerDay);
+    }
+  }
+  const ruleDayCounts = new Map<string, Map<string, number>>();
+  for (const lesson of placed) {
+    if (!maxDailyByRule.has(lesson.ruleId)) continue;
+    if (!ruleDayCounts.has(lesson.ruleId)) ruleDayCounts.set(lesson.ruleId, new Map());
+    const dayMap = ruleDayCounts.get(lesson.ruleId)!;
+    dayMap.set(lesson.day, (dayMap.get(lesson.day) || 0) + 1);
+  }
+
   const ruleById = new Map((project.curriculum || []).map(r => [r.id, r]));
 
   for (const group of project.groups || []) {
@@ -143,7 +159,7 @@ export function analyzeEmptySlots(
         }
 
         const atCap = dayCount >= maxDaily;
-        const blockers = { teacher: false, room: false, noFirst: false };
+        const blockers = { teacher: false, room: false, noFirst: false, ruleDaily: false };
         let openRule = false;
 
         for (const rule of groupRules) {
@@ -157,13 +173,16 @@ export function analyzeEmptySlots(
           const noFirst = period === start && noFirstRules.some(r =>
             r.subjectId === rule.subjectId && (!r.groupId || r.groupId === group.id)
           );
+          const cap = maxDailyByRule.get(rule.id);
+          const ruleDaily = cap !== undefined && (ruleDayCounts.get(rule.id)?.get(day) || 0) >= cap;
 
-          if (!teacherBusy && !roomBusy && !noFirst && !atCap) {
+          if (!teacherBusy && !roomBusy && !noFirst && !atCap && !ruleDaily) {
             openRule = true;
           } else {
             if (teacherBusy) blockers.teacher = true;
             if (roomBusy) blockers.room = true;
             if (noFirst) blockers.noFirst = true;
+            if (ruleDaily) blockers.ruleDaily = true;
           }
         }
 
@@ -172,6 +191,7 @@ export function analyzeEmptySlots(
           if (blockers.teacher) add(key, EMPTY_SLOT_REASON.TEACHER_BUSY);
           if (blockers.room) add(key, EMPTY_SLOT_REASON.ROOM_BUSY);
           if (blockers.noFirst) add(key, EMPTY_SLOT_REASON.NO_FIRST);
+          if (blockers.ruleDaily) add(key, EMPTY_SLOT_REASON.DAILY_RULE);
         }
         if (openRule || result.get(key) === undefined) {
           add(key, EMPTY_SLOT_REASON.DAY_BALANCE);
@@ -267,11 +287,14 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
   const groupMap = new Map(project.groups.map(g => [g.id, g]));
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
+  const maxDailyByRule = new Map<string, number>();
   for (const c of project.constraints || []) {
     if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
       teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
     } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
       noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
+    } else if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
+      maxDailyByRule.set(c.ruleId, c.maxPerDay);
     }
   }
 
@@ -314,6 +337,22 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
       for (const lesson of placed) {
         if (lesson.groupId === groupId && lesson.day === day) add(lesson.id, CONFLICT_REASON.DAILY_OVERLOAD);
       }
+    }
+  }
+
+  const ruleDayIds = new Map<string, Map<string, string[]>>();
+  for (const lesson of placed) {
+    if (!maxDailyByRule.has(lesson.ruleId)) continue;
+    if (!ruleDayIds.has(lesson.ruleId)) ruleDayIds.set(lesson.ruleId, new Map());
+    const dayMap = ruleDayIds.get(lesson.ruleId)!;
+    if (!dayMap.has(lesson.day)) dayMap.set(lesson.day, []);
+    dayMap.get(lesson.day)!.push(lesson.id);
+  }
+  for (const [ruleId, dayMap] of ruleDayIds) {
+    const cap = maxDailyByRule.get(ruleId)!;
+    for (const ids of dayMap.values()) {
+      if (ids.length <= cap) continue;
+      for (const id of ids) add(id, CONFLICT_REASON.DAILY_RULE);
     }
   }
 

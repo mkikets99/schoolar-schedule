@@ -65,7 +65,7 @@ export interface LoadDistribution {
   hours: number;
 }
 
-export type ConstraintKind = 'TEACHER_BUSY' | 'NO_FIRST_PERIOD' | 'FORBID_LESSON';
+export type ConstraintKind = 'TEACHER_BUSY' | 'NO_FIRST_PERIOD' | 'FORBID_LESSON' | 'MAX_DAILY_LESSONS';
 
 export interface Constraint {
   id: string;
@@ -78,6 +78,7 @@ export interface Constraint {
   ruleId?: string; // FORBID_LESSON: the curriculum rule (lesson) this applies to
   semester?: 1 | 2; // FORBID_LESSON: the semester whose hour count is being set
   hours?: number; // FORBID_LESSON: hours distributed in that semester (0 = forbidden)
+  maxPerDay?: number; // MAX_DAILY_LESSONS: max times this rule may appear in one day
 }
 
 export interface Lesson {

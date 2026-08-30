@@ -167,11 +167,14 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
 
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
+  const maxDailyByRule = new Map<string, number>();
   for (const c of project.constraints || []) {
     if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
       teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
     } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
       noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
+    } else if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
+      maxDailyByRule.set(c.ruleId, c.maxPerDay);
     }
   }
 
@@ -287,6 +290,11 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     dailyCounts.set(gid, days.map(() => 0));
   }
 
+  const ruleDailyCounts = new Map<string, number[]>();
+  for (const ruleId of maxDailyByRule.keys()) {
+    ruleDailyCounts.set(ruleId, days.map(() => 0));
+  }
+
   const teacherDailyCounts = new Map<string, number[]>();
   for (const t of project.teachers || []) {
     teacherDailyCounts.set(t.id, days.map(() => 0));
@@ -353,6 +361,12 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
     const cfg = groupConfig.get(lesson.groupId);
     if (isForbiddenFirstPeriod(lesson, period, cfg?.periodStart ?? 1)) return false;
+    const cap = maxDailyByRule.get(lesson.ruleId);
+    if (cap !== undefined) {
+      const di = days.indexOf(day);
+      const counts = ruleDailyCounts.get(lesson.ruleId)!;
+      if (counts[di] >= cap) return false;
+    }
     if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
       const alt = findFallbackRoom(lesson.roomId, slotKey);
       if (!alt) return false;
@@ -395,6 +409,8 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
         const tcounts = teacherDailyCounts.get(lesson.teacherId);
         if (tcounts) tcounts[di]++;
       }
+      const rcounts = ruleDailyCounts.get(lesson.ruleId);
+      if (rcounts) rcounts[di]++;
     }
   }
 
@@ -403,6 +419,12 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     const cfg = groupConfig.get(unit.groupId);
     const pEnd = cfg?.periodEnd ?? 8;
     if (period + 1 > pEnd) return false;
+    const cap = maxDailyByRule.get(lesson.ruleId);
+    if (cap !== undefined) {
+      const di = days.indexOf(day);
+      const counts = ruleDailyCounts.get(lesson.ruleId)!;
+      if (counts[di] + 2 > cap) return false;
+    }
     if (!canPlace(lesson, day, period, false)) return false;
     if (!canPlace(lesson, day, period + 1, false)) return false;
     placeLesson(lesson, day, period);

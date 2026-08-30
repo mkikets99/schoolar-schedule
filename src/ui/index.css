@@ -1266,6 +1266,11 @@ tr.split-group + tr.split-group td {
   color: #ff6b6b;
 }
 
+.constraint-badge.max-daily {
+  background: #00b89433;
+  color: #00b894;
+}
+
 .project-info {
   display: flex;
   align-items: center;
