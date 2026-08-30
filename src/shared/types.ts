@@ -134,6 +134,13 @@ export function computeGroupScheduleConfig(group: Partial<Group> | undefined): G
   return { periodStart, periodEnd, maxDaily: cappedMax };
 }
 
+export interface GenerateSettings {
+  /** Number of candidate schedules to generate and keep the best of. */
+  attempts: number;
+  /** How many times unplaced lessons may be re-distributed between semesters. */
+  maxSpillPasses: number;
+}
+
 export interface ProjectState {
   version: string;
   school: School;

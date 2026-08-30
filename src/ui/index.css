@@ -878,6 +878,13 @@ tr.unassigned {
   box-shadow: 0 0 0 2px rgba(100, 108, 255, 0.2);
 }
 
+.form-hint {
+  margin: -0.25rem 0 0.75rem;
+  color: #888;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
 .primary-btn {
   background-color: #646cff;
   color: white;

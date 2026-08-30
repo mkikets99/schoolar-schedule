@@ -1,4 +1,9 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings } from '../shared/types';
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(value)));
+}
 
 interface LessonStub {
   id: string;
@@ -738,10 +743,11 @@ function collectUnassigned(result: ScheduleResult): Map<string, number> {
   return map;
 }
 
-export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void) {
+export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void, settings?: Partial<GenerateSettings>) {
   // Generate many candidate schedules and keep the one that places the most
   // lessons while producing the tidyest teacher distribution.
-  const ATTEMPTS = 20;
+  const attempts = clampInt(settings?.attempts ?? 20, 1, 200);
+  const maxSpillPasses = clampInt(settings?.maxSpillPasses ?? 4, 0, 20);
 
   // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
   // the spillover must not move lessons across (respecting the forbid).
@@ -787,7 +793,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     // adjusting the per-rule split (the annual hour total is preserved). Only
     // fractional rules move; integer and pinned-forbid rules keep their split.
     // We iterate so a lesson can cascade to whichever semester actually has room.
-    for (let iter = 0; iter < 4; iter++) {
+    for (let iter = 0; iter < maxSpillPasses; iter++) {
       const out1 = collectUnassigned(semester1);
       const out2 = collectUnassigned(semester2);
       if (out1.size === 0 && out2.size === 0) break;
@@ -820,15 +826,15 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
 
   let best: { schedules: SemesterSchedules; splits: SemesterSplit[]; quality: number } | null = null;
 
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const progressBase = Math.floor((attempt / ATTEMPTS) * 95);
-    const progressSpan = 95 / ATTEMPTS;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const progressBase = Math.floor((attempt / attempts) * 95);
+    const progressSpan = 95 / attempts;
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
     const quality = scoreAttempt(candidate.schedules, candidate.splits, project, fixedRules);
     if (!best || quality > best.quality) {
       best = { ...candidate, quality };
     }
-    emit({ type: 'PROGRESS', payload: { progress: Math.floor(((attempt + 1) / ATTEMPTS) * 95) } });
+    emit({ type: 'PROGRESS', payload: { progress: Math.floor(((attempt + 1) / attempts) * 95) } });
   }
 
   emit({ type: 'PROGRESS', payload: { progress: 100 } });
@@ -838,7 +844,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     payload: {
       schedules: best!.schedules,
       splits: best!.splits,
-      attempts: ATTEMPTS,
+      attempts,
       bestQuality: best!.quality,
     },
   });

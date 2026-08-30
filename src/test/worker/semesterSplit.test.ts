@@ -124,6 +124,29 @@ describe('buildSemesterProject', () => {
 });
 
 describe('generateSemesterSchedules', () => {
+  it('honors the attempts and maxSpillPasses settings', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg), { attempts: 3, maxSpillPasses: 0 });
+
+    const payload = messages.find(m => m.type === 'RESULT')!.payload;
+    expect(payload.attempts).toBe(3);
+    expect(payload.schedules.semester1.schedule.length).toBe(5);
+    expect(payload.schedules.semester2.schedule.length).toBe(5);
+  });
+
+  it('defaults to 20 attempts when no settings are provided', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find(m => m.type === 'RESULT')!.payload;
+    expect(payload.attempts).toBe(20);
+  });
+
   it('returns a result with both semester schedules and splits', async () => {
     const project = makeProject([
       { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },

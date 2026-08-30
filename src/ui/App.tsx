@@ -11,6 +11,8 @@ import { CurriculumEditor } from './components/CurriculumEditor';
 import { LoadDistributionUI } from './components/LoadDistributionUI';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
+import { GenerateModal } from './components/GenerateModal';
+import { GenerateSettings } from '../shared/types';
 import { exportProject } from './services/ProjectExportService';
 import { exportScheduleJSON } from './services/ExportService';
 import './index.css';
@@ -73,7 +75,7 @@ function AppContent() {
 
   const [currentView, setCurrentView] = useState<'dashboard' | 'school' | 'teachers' | 'subjects' | 'rooms' | 'groups' | 'curriculum' | 'load' | 'schedule' | 'constraints'>('dashboard');
 
-  const handleGenerateSchedule = () => {
+  const handleGenerateSchedule = (settingsOverride?: GenerateSettings) => {
     if (workerRef.current && project) {
       clearGeneratedSchedule();
       setWorkerStatus(t('starting_gen'));
@@ -81,11 +83,32 @@ function AppContent() {
         if (workerRef.current) {
           workerRef.current.postMessage({
             type: 'GENERATE_SCHEDULE',
-            payload: project
+            payload: {
+              project,
+              settings: settingsOverride ?? generateSettings,
+            },
           });
         }
       }, 50);
     }
+  };
+
+  const [generateSettings, setGenerateSettings] = useState<GenerateSettings>({ attempts: 20, maxSpillPasses: 4 });
+  const [generateSettingsOpen, setGenerateSettingsOpen] = useState(false);
+
+  const handleGenerateClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setGenerateSettingsOpen(true);
+      return;
+    }
+    handleGenerateSchedule();
+  };
+
+  const handleGenerateWithSettings = (settings: GenerateSettings) => {
+    setGenerateSettings(settings);
+    setGenerateSettingsOpen(false);
+    handleGenerateSchedule(settings);
   };
 
   const handleClearSchedule = () => {
@@ -221,7 +244,7 @@ function AppContent() {
                         {hasAnySchedule(project) && (
                           <button onClick={handleClearSchedule} className="delete-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>{t('clear_schedule')}</button>
                         )}
-                        <button onClick={handleGenerateSchedule} className="generate-btn-small">{hasAnySchedule(project) ? t('regenerate') : t('generate')}</button>
+                        <button onClick={handleGenerateClick} className="generate-btn-small" title={t('generate_btn_hint')}>{hasAnySchedule(project) ? t('regenerate') : t('generate')}</button>
                       </div>
                     </div>
                   <ScheduleViewer />
@@ -231,6 +254,12 @@ function AppContent() {
           </div>
         )}
       </main>
+    <GenerateModal
+        open={generateSettingsOpen}
+        settings={generateSettings}
+        onClose={() => setGenerateSettingsOpen(false)}
+        onGenerate={handleGenerateWithSettings}
+      />
     </div>
   );
 }

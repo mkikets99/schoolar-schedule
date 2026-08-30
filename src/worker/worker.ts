@@ -12,9 +12,12 @@ self.onmessage = (event) => {
       });
       break;
 
-    case 'GENERATE_SCHEDULE':
-      generateSemesterSchedules(payload as ProjectState, (msg) => self.postMessage(msg));
+    case 'GENERATE_SCHEDULE': {
+      const project = payload?.project ?? payload;
+      const settings = payload?.settings;
+      generateSemesterSchedules(project as ProjectState, (msg) => self.postMessage(msg), settings);
       break;
+    }
 
     default:
       console.warn('Worker: Unknown message type', type);
