@@ -250,4 +250,47 @@ describe('generateSemesterSchedules', () => {
       for (const count of bySlot.values()) expect(count).toBeLessThanOrEqual(1);
     }
   });
+
+  it('places a pinned, capped rule 8/8 in both semesters inside a tight week', async () => {
+    // g1 can host 15 lessons per semester (periodStart 1, periodEnd 5, maxDaily 3).
+    // The week needs 19, so the schedule is over-subscribed and greedy placement
+    // would otherwise let larger groups push the ukr rule out (a lesson left
+    // unassigned means one semester ends up with fewer than its pinned 8 lessons).
+    // The worker must prioritize the pinned rule so it is always fully placed.
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 8, teacherId: 't1' },
+      { id: 'c2', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 6, teacherId: 't2' },
+      { id: 'c3', groupId: 'g1', subjectId: 'subj-hist', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    project.groups = [{ id: 'g1', name: '10-A', grade: 10, subgroups: [], periodStart: 1, periodEnd: 5, maxDailyLessons: 3 }];
+    project.constraints = [
+      { id: 'pin', kind: 'FORBID_LESSON', ruleId: 'c1', semester: 1, hours: 8 },
+      { id: 'cap', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 2 },
+    ];
+
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+
+    const split = payload.splits.find((s: any) => s.ruleId === 'c1');
+    expect(split.first).toBe(8);
+    expect(split.second).toBe(8);
+
+    for (const semester of ['semester1', 'semester2'] as const) {
+      // Every one of the pinned 8 lessons is actually placed in this semester.
+      const lessons = payload.schedules[semester].schedule.filter((l: any) => l.ruleId === 'c1');
+      expect(lessons).toHaveLength(8);
+      // And the per-day cap is still honored.
+      const perDay = new Map<string, number>();
+      for (const l of lessons) perDay.set(l.day, (perDay.get(l.day) || 0) + 1);
+      for (const count of perDay.values()) expect(count).toBeLessThanOrEqual(2);
+    }
+
+    // No c1 lesson is left unassigned in either semester.
+    const unassigned = [
+      ...payload.schedules.semester1.conflicts,
+      ...payload.schedules.semester2.conflicts,
+    ].filter((c: any) => c.type === 'UNASSIGNED_HOURS' && c.ruleId === 'c1');
+    expect(unassigned).toHaveLength(0);
+  });
 });

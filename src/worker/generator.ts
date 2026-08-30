@@ -84,10 +84,18 @@ function intendedLoads(
 
 // Higher is better. Placement completeness dominates; distribution quality and
 // closeness to the intended load distribution only break ties between otherwise
-// equally-complete schedules.
-function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState): number {
+// equally-complete schedules. Unplaced hours of rules with a fixed per-semester
+// split (FORBID_LESSON) are penalized heavily so the chosen attempt prioritizes
+// fulfilling the pinned load over raw completeness.
+function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState, pinnedRuleIds?: Set<string>): number {
   const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
   const placed = (schedules.semester1.score + schedules.semester2.score) / 2;
+  const pinnedUnassigned = (schedules.semester1.conflicts || [])
+    .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
+    .reduce((sum, c) => sum + (c.missing ?? 1), 0)
+    + (schedules.semester2.conflicts || [])
+      .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
+      .reduce((sum, c) => sum + (c.missing ?? 1), 0);
 
   const byTeacherDay = new Map<string, Map<string, number[]>>();
   for (const sem of [schedules.semester1.schedule, schedules.semester2.schedule]) {
@@ -141,7 +149,7 @@ function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], pro
     deviation += Math.abs(g.s1 - a.s1) + Math.abs(g.s2 - a.s2);
   }
 
-  return placed * 1000 - unassigned + distribution * 0.01 - deviation * 0.01;
+  return placed * 1000 - unassigned - pinnedUnassigned * 500 + distribution * 0.01 - deviation * 0.01;
 }
 
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
@@ -149,7 +157,7 @@ export async function generateSchedule(project: ProjectState, emit: (msg: Worker
   emit({ type: 'RESULT', payload: result });
 }
 
-async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void, rng?: () => number): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
+async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void, rng?: () => number, pinnedRuleIds?: Set<string>): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const allRooms = project.rooms || [];
 
@@ -191,7 +199,7 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     if (seen.get(key)!.length > 1) splitKeys.add(key);
   }
 
-  const units: SchedulingUnit[] = [];
+  let units: SchedulingUnit[] = [];
 
   for (const [key, rules] of seen) {
     const [groupId] = key.split('|');
@@ -313,7 +321,18 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     return a.lessons[0]?.id.localeCompare(b.lessons[0]?.id || '') || 0;
   });
 
-  if (rng) shuffleInPlace(units, rng);
+  if (rng && pinnedRuleIds && pinnedRuleIds.size > 0) {
+    const pinned: SchedulingUnit[] = [];
+    const rest: SchedulingUnit[] = [];
+    for (const u of units) {
+      (pinnedRuleIds.has(u.lessons[0].ruleId) ? pinned : rest).push(u);
+    }
+    shuffleInPlace(pinned, rng);
+    shuffleInPlace(rest, rng);
+    units = pinned.concat(rest);
+  } else if (rng) {
+    shuffleInPlace(units, rng);
+  }
 
   const schedule: any[] = [];
   const conflicts: any[] = [];
@@ -740,7 +759,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
           const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
           emit({ type: 'PROGRESS', payload: { progress: Math.round(progressBase + (p / 100) * progressSpan) } });
         }
-      }, rng);
+      }, rng, fixedRules);
     };
 
     let splits = computeSemesterSplits(project);
@@ -794,7 +813,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     const progressBase = Math.floor((attempt / ATTEMPTS) * 95);
     const progressSpan = 95 / ATTEMPTS;
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
-    const quality = scoreAttempt(candidate.schedules, candidate.splits, project);
+    const quality = scoreAttempt(candidate.schedules, candidate.splits, project, fixedRules);
     if (!best || quality > best.quality) {
       best = { ...candidate, quality };
     }
