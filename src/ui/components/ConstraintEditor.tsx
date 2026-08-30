@@ -5,6 +5,7 @@ import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
 import { SearchableSelect } from './SearchableSelect';
+import { MultiSelect } from './MultiSelect';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -38,10 +39,10 @@ export const ConstraintEditor = () => {
   const [firstSubjectId, setFirstSubjectId] = useState('');
   const [firstGroupId, setFirstGroupId] = useState('');
 
-  const [forbidRuleId, setForbidRuleId] = useState('');
+  const [forbidRuleIds, setForbidRuleIds] = useState<string[]>([]);
   const [forbidSemester, setForbidSemester] = useState<1 | 2>(1);
   const [forbidHours, setForbidHours] = useState(0);
-  const [maxDailyRuleId, setMaxDailyRuleId] = useState('');
+  const [maxDailyRuleIds, setMaxDailyRuleIds] = useState<string[]>([]);
   const [maxDailyPerDay, setMaxDailyPerDay] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editId, setEditId] = useState<string | null>(null);
@@ -104,11 +105,11 @@ export const ConstraintEditor = () => {
       setFirstGroupId(c.groupId || '');
       setFirstOpen(true);
     } else if (c.kind === 'MAX_DAILY_LESSONS') {
-      setMaxDailyRuleId(c.ruleId || '');
+      setMaxDailyRuleIds(c.ruleId ? [c.ruleId] : []);
       setMaxDailyPerDay(c.maxPerDay ?? 1);
       setMaxDailyOpen(true);
     } else {
-      setForbidRuleId(c.ruleId || '');
+      setForbidRuleIds(c.ruleId ? [c.ruleId] : []);
       setForbidSemester(c.semester || 1);
       setForbidHours(c.hours ?? 0);
       setForbidOpen(true);
@@ -185,21 +186,51 @@ export const ConstraintEditor = () => {
   };
 
   const handleAddForbid = () => {
-    if (!forbidRuleId) { alert(t('need_rule')); return; }
-    const draft: Constraint = {
-      id: editId || crypto.randomUUID(),
-      kind: 'FORBID_LESSON',
-      ruleId: forbidRuleId,
-      semester: forbidSemester,
-      hours: Math.max(0, Math.floor(forbidHours || 0)),
-    };
-    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
-    if (editId) {
-      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
-    } else {
-      updateConstraints([...constraints, draft]);
+    if (forbidRuleIds.length === 0) { alert(t('need_rule')); return; }
+    const hours = Math.max(0, Math.floor(forbidHours || 0));
+    // In edit mode the edited row is re-scoped to the newly selected rules.
+    const base = editId ? constraints.filter(c => c.id !== editId) : constraints;
+
+    const byKey = new Map<string, Constraint>();
+    for (const c of base) {
+      if (c.kind === 'FORBID_LESSON' && c.ruleId) byKey.set(`${c.ruleId}|${c.semester}`, { ...c });
     }
-    setForbidRuleId('');
+
+    let changed = 0;
+    for (const ruleId of forbidRuleIds) {
+      const key = `${ruleId}|${forbidSemester}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        if (existing.hours !== hours) {
+          byKey.set(key, { ...existing, hours });
+          changed++;
+        }
+      } else {
+        byKey.set(key, {
+          id: crypto.randomUUID(),
+          kind: 'FORBID_LESSON',
+          ruleId,
+          semester: forbidSemester,
+          hours,
+        });
+        changed++;
+      }
+    }
+
+    if (!editId && changed === 0) { alert(t('duplicate_constraint')); return; }
+
+    const result: Constraint[] = [];
+    for (const c of base) {
+      if (c.kind !== 'FORBID_LESSON' || !c.ruleId) { result.push(c); continue; }
+      const key = `${c.ruleId}|${c.semester}`;
+      const merged = byKey.get(key);
+      if (merged) { byKey.delete(key); result.push(merged); }
+      else result.push(c);
+    }
+    for (const c of byKey.values()) result.push(c);
+
+    updateConstraints(result);
+    setForbidRuleIds([]);
     setForbidSemester(1);
     setForbidHours(0);
     setEditId(null);
@@ -207,21 +238,48 @@ export const ConstraintEditor = () => {
   };
 
   const handleAddMaxDaily = () => {
-    if (!maxDailyRuleId) { alert(t('need_rule')); return; }
+    if (maxDailyRuleIds.length === 0) { alert(t('need_rule')); return; }
     const perDay = Math.max(1, Math.floor(maxDailyPerDay || 0));
-    const draft: Constraint = {
-      id: editId || crypto.randomUUID(),
-      kind: 'MAX_DAILY_LESSONS',
-      ruleId: maxDailyRuleId,
-      maxPerDay: perDay,
-    };
-    if (findDuplicateConstraint(draft, editId ?? undefined)) { alert(t('duplicate_constraint')); return; }
-    if (editId) {
-      updateConstraints(constraints.map(c => c.id === editId ? { ...draft, id: editId } : c));
-    } else {
-      updateConstraints([...constraints, draft]);
+    // In edit mode the edited row is re-scoped to the newly selected rules.
+    const base = editId ? constraints.filter(c => c.id !== editId) : constraints;
+
+    const byKey = new Map<string, Constraint>();
+    for (const c of base) {
+      if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId) byKey.set(c.ruleId, { ...c });
     }
-    setMaxDailyRuleId('');
+
+    let changed = 0;
+    for (const ruleId of maxDailyRuleIds) {
+      const existing = byKey.get(ruleId);
+      if (existing) {
+        if (existing.maxPerDay !== perDay) {
+          byKey.set(ruleId, { ...existing, maxPerDay: perDay });
+          changed++;
+        }
+      } else {
+        byKey.set(ruleId, {
+          id: crypto.randomUUID(),
+          kind: 'MAX_DAILY_LESSONS',
+          ruleId,
+          maxPerDay: perDay,
+        });
+        changed++;
+      }
+    }
+
+    if (!editId && changed === 0) { alert(t('duplicate_constraint')); return; }
+
+    const result: Constraint[] = [];
+    for (const c of base) {
+      if (c.kind !== 'MAX_DAILY_LESSONS' || !c.ruleId) { result.push(c); continue; }
+      const merged = byKey.get(c.ruleId);
+      if (merged) { byKey.delete(c.ruleId); result.push(merged); }
+      else result.push(c);
+    }
+    for (const c of byKey.values()) result.push(c);
+
+    updateConstraints(result);
+    setMaxDailyRuleIds([]);
     setMaxDailyPerDay(1);
     setEditId(null);
     setMaxDailyOpen(false);
@@ -389,12 +447,11 @@ export const ConstraintEditor = () => {
       >
         <p className="section-desc">{t('forbid_lesson_hint')}</p>
         <FormField label={t('lesson')}>
-          <SearchableSelect
-            value={forbidRuleId}
-            onChange={setForbidRuleId}
+          <MultiSelect
+            value={forbidRuleIds}
+            onChange={setForbidRuleIds}
             options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
             placeholder={t('select_rule')}
-            allowEmpty
           />
         </FormField>
         <FormField label={t('semester')}>
@@ -426,12 +483,11 @@ export const ConstraintEditor = () => {
       >
         <p className="section-desc">{t('max_daily_hint')}</p>
         <FormField label={t('lesson')}>
-          <SearchableSelect
-            value={maxDailyRuleId}
-            onChange={setMaxDailyRuleId}
+          <MultiSelect
+            value={maxDailyRuleIds}
+            onChange={setMaxDailyRuleIds}
             options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
             placeholder={t('select_rule')}
-            allowEmpty
           />
         </FormField>
         <FormField label={t('max_per_day')}>

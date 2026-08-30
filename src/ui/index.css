@@ -1779,6 +1779,38 @@ tr.split-group + tr.split-group td {
   outline: none;
 }
 
+.combobox-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid #333;
+  background-color: #222;
+}
+
+.combobox-actions button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #2a2a2a;
+  color: #ccc;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.combobox-actions button:hover {
+  color: #fff;
+  border-color: #666;
+}
+
+.combobox-actions-count {
+  margin-left: auto;
+  color: #777;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .combobox-list {
   overflow-y: auto;
   max-height: 240px;

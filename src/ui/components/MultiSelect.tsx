@@ -69,6 +69,15 @@ export const MultiSelect = ({
     }
   };
 
+  // Add (never remove) the given ids to the current selection.
+  const merge = (ids: string[]) => {
+    const next = new Set(value);
+    for (const id of ids) next.add(id);
+    onChange([...next]);
+  };
+
+  const hasQuery = query.trim().length > 0;
+
   return (
     <div className={`combobox ${className}`} ref={containerRef}>
       <button
@@ -83,7 +92,7 @@ export const MultiSelect = ({
         <span className="combobox-trigger-label">
           {selectedLabels.length === 0
             ? placeholder
-            : `${selectedLabels.join(', ')}`}
+            : selectedLabels.join(', ')}
         </span>
         <span className="combobox-caret">&#9662;</span>
       </button>
@@ -97,6 +106,17 @@ export const MultiSelect = ({
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('search_placeholder')}
           />
+          <div className="combobox-actions">
+            <button type="button" onClick={() => merge(sortedOptions.map(o => o.value))}>
+              {t('select_all')}
+            </button>
+            {hasQuery && (
+              <button type="button" onClick={() => merge(visibleOptions.map(o => o.value))}>
+                {t('select_visible')} ({visibleOptions.length})
+              </button>
+            )}
+            <span className="combobox-actions-count">{t('selected_count', { count: selectedLabels.length })}</span>
+          </div>
           <div className="combobox-list" role="listbox" aria-multiselectable="true">
             {visibleOptions.map(opt => (
               <label key={opt.value} className="combobox-option-check" data-value={opt.value}>
