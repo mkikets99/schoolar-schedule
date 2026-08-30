@@ -751,6 +751,16 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
       .map((c) => c.ruleId!)
   );
 
+  // Rules with integer hours have a canonical balanced split (e.g. 4/4, 1/1).
+  // The spillover may only shift lessons for fractional rules, so an integer rule
+  // keeps its split even if a lesson has to stay unassigned - never drifting to a
+  // skewed 3/5 or 0/2 just to place a whole lesson somewhere.
+  const splitLock = new Set(
+    project.curriculum
+      .filter((r) => Number.isInteger(r.hoursPerWeek) && !fixedRules.has(r.id))
+      .map((r) => r.id)
+  );
+
   async function generateAttempt(seed: number, progressBase: number, progressSpan: number) {
     const rng = mulberry32(seed);
     const runScaled = async (semesterProject: ProjectState) => {
@@ -774,15 +784,16 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     let semester2 = await runScaled(buildSemesterProject(project, 2, splits));
 
     // Lessons that cannot be placed in one semester are moved to the other by
-    // adjusting the per-rule split (the annual hour total is preserved). We iterate
-    // so a lesson can cascade to whichever semester actually has room.
+    // adjusting the per-rule split (the annual hour total is preserved). Only
+    // fractional rules move; integer and pinned-forbid rules keep their split.
+    // We iterate so a lesson can cascade to whichever semester actually has room.
     for (let iter = 0; iter < 4; iter++) {
       const out1 = collectUnassigned(semester1);
       const out2 = collectUnassigned(semester2);
       if (out1.size === 0 && out2.size === 0) break;
 
       const nextSplits = splits.map((s) => {
-        if (fixedRules.has(s.ruleId)) return s; // forbid constraint: keep split fixed
+        if (fixedRules.has(s.ruleId) || splitLock.has(s.ruleId)) return s; // keep canonical split
         const movedFrom1 = out1.get(s.ruleId) || 0;
         const movedFrom2 = out2.get(s.ruleId) || 0;
         return {

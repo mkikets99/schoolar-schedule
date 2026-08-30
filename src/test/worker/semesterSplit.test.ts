@@ -145,6 +145,48 @@ describe('generateSemesterSchedules', () => {
     expect(s2Count).toBe(6); // 5 + floor(1.5)
   });
 
+  it('keeps a balanced integer split instead of shifting a whole lesson to the other semester', async () => {
+    // g1 has 5 lesson slots per semester (periodStart 1, periodEnd 1, maxDaily 1).
+    // c1 (4h) + c2 (2h) need 6 slots per semester but only 5 exist, so one hour
+    // cannot be placed. Both rules have integer hours, so neither may shift a
+    // whole lesson across semesters: the splits must stay canonical 4/4 and 2/2
+    // while the shortfall is reported as unassigned instead of a skewed 3/5.
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 4, teacherId: 't1' },
+      { id: 'c2', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 2, teacherId: 't1' },
+    ]);
+    project.groups = [{ id: 'g1', name: '10-A', grade: 10, subgroups: [], periodStart: 1, periodEnd: 1, maxDailyLessons: 1 }];
+
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg));
+    const payload = messages.find((m) => m.type === 'RESULT')!.payload;
+
+    const c1 = payload.splits.find((s: any) => s.ruleId === 'c1');
+    const c2 = payload.splits.find((s: any) => s.ruleId === 'c2');
+    expect(c1.first).toBe(4);
+    expect(c1.second).toBe(4);
+    expect(c2.first).toBe(2);
+    expect(c2.second).toBe(2);
+
+    // The shortfall (2 hours, 1 per semester) is honestly unassigned, not hidden
+    // by shifting whole lessons into the other semester.
+    const c1Placed = ['semester1', 'semester2']
+      .map((sem) => payload.schedules[sem].schedule.filter((l: any) => l.ruleId === 'c1').length)
+      .reduce((a, b) => a + b, 0);
+    const c2Placed = ['semester1', 'semester2']
+      .map((sem) => payload.schedules[sem].schedule.filter((l: any) => l.ruleId === 'c2').length)
+      .reduce((a, b) => a + b, 0);
+    const missing = [
+      ...payload.schedules.semester1.conflicts,
+      ...payload.schedules.semester2.conflicts,
+    ].filter((c: any) => c.type === 'UNASSIGNED_HOURS')
+      .reduce((sum: number, c: any) => sum + (c.missing ?? 1), 0);
+
+    expect(c1Placed + c2Placed).toBe(10); // 5 slots per semester x 2
+    expect(missing).toBe(2); // 12 required - 10 placed
+    expect(c1Placed + c2Placed + missing).toBe(12);
+  });
+
   it('moves lessons that do not fit in one semester into the other semester', async () => {
     // g1 holds 5 lessons/week. c1 (4.5h) needs room r1; c2 (0.5h) also needs r1.
     // Semester1 gets c1=5 + c2=1 = 6 lessons competing for 5 r1 slots, so c2
