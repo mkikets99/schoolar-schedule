@@ -1,5 +1,25 @@
 import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings } from '../shared/types';
 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+// ---------------------------------------------------------------------------
+// Gap-optimization model (worker v0.2)
+//
+// The primary quality goal is teacher compactness: a teacher's weekly schedule
+// should have as few free (empty) periods between their first and last lesson
+// of a day as possible - ideally zero. Gaps are only acceptable when they are
+// unavoidable (a teacher, class, or room collision forces them), and the
+// generator aims for the least total free hours. Any teacher left with more
+// than BAD_TEACHER_GAP_HOURS free hours in a week makes the whole schedule a
+// "bad solution": it is only kept when every alternative is worse (i.e. it is
+// a forced solution).
+// ---------------------------------------------------------------------------
+
+const GAP_HOUR_PENALTY = 10; // per free hour, in score units
+const BAD_TEACHER_GAP_HOURS = 5; // weekly free hours that turn a teacher "bad"
+const BAD_TEACHER_PENALTY = 500; // per bad teacher
+const DEFAULT_OPTIMIZE_PASSES = 8; // local-search rounds after greedy placement
+
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.max(min, Math.min(max, Math.trunc(value)));
@@ -52,6 +72,78 @@ function countUnassigned(result: ScheduleResult): number {
     .reduce((sum, c) => sum + (c.missing ?? 1), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Teacher gap accounting
+// ---------------------------------------------------------------------------
+
+function dayPeriodsOf(schedule: any[], teacherId: string, day: string): number[] {
+  const out: number[] = [];
+  for (const lesson of schedule) {
+    if (lesson.teacherId === teacherId && lesson.day === day) out.push(lesson.period);
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+/** Free periods strictly between the first and last lesson of a day. */
+function gapOfPeriods(periods: number[]): number {
+  let gap = 0;
+  for (let i = 1; i < periods.length; i++) gap += Math.max(0, periods[i] - periods[i - 1] - 1);
+  return gap;
+}
+
+function teacherDayGap(schedule: any[], teacherId: string, day: string): number {
+  return gapOfPeriods(dayPeriodsOf(schedule, teacherId, day));
+}
+
+function teacherWeekGap(schedule: any[], teacherId: string): number {
+  let total = 0;
+  for (const day of DAYS) total += teacherDayGap(schedule, teacherId, day);
+  return total;
+}
+
+/** How much adding extra periods on `day` changes the teacher's free-hour count. */
+function extraPeriodsGapDelta(schedule: any[], teacherId: string, day: string, extra: number[]): number {
+  if (!teacherId) return 0;
+  const current = dayPeriodsOf(schedule, teacherId, day);
+  const merged = [...new Set([...current, ...extra])].sort((a, b) => a - b);
+  return gapOfPeriods(merged) - gapOfPeriods(current);
+}
+
+interface GapStats {
+  totalGapHours: number;
+  badTeachers: number;
+}
+
+function combinedGapStats(schedules: SemesterSchedules): GapStats {
+  const teacherIds = new Set<string>();
+  for (const semester of [schedules.semester1.schedule, schedules.semester2.schedule]) {
+    for (const lesson of semester) {
+      if (lesson.teacherId) teacherIds.add(lesson.teacherId);
+    }
+  }
+  let totalGapHours = 0;
+  let badTeachers = 0;
+  for (const teacherId of teacherIds) {
+    const week1 = teacherWeekGap(schedules.semester1.schedule, teacherId);
+    const week2 = teacherWeekGap(schedules.semester2.schedule, teacherId);
+    totalGapHours += week1 + week2;
+    if (week1 > BAD_TEACHER_GAP_HOURS) badTeachers++;
+    if (week2 > BAD_TEACHER_GAP_HOURS) badTeachers++;
+  }
+  return { totalGapHours, badTeachers };
+}
+
+function teacherGapReport(schedule: any[]): { totalGapHours: number; badTeachers: string[]; teachers: { id: string; weekGap: number }[] } {
+  const ids = [...new Set(schedule.map((l) => l.teacherId).filter(Boolean))];
+  const teachers = ids
+    .map((id) => ({ id, weekGap: teacherWeekGap(schedule, id) }))
+    .sort((a, b) => b.weekGap - a.weekGap || a.id.localeCompare(b.id));
+  const totalGapHours = teachers.reduce((s, t) => s + t.weekGap, 0);
+  const badTeachers = teachers.filter((t) => t.weekGap > BAD_TEACHER_GAP_HOURS).map((t) => t.id);
+  return { totalGapHours, badTeachers, teachers };
+}
+
 // Intended per-semester lesson load per teacher and per group. When an explicit
 // loadDistribution input exists it is used (hours are treated as the annual weekly
 // target, so each semester gets half); otherwise the curriculum splits are summed.
@@ -87,11 +179,14 @@ function intendedLoads(
   return { teacher, group };
 }
 
-// Higher is better. Placement completeness dominates; distribution quality and
-// closeness to the intended load distribution only break ties between otherwise
-// equally-complete schedules. Unplaced hours of rules with a fixed per-semester
-// split (FORBID_LESSON) are penalized heavily so the chosen attempt prioritizes
-// fulfilling the pinned load over raw completeness.
+// Higher is better. Placement completeness dominates (a schedule must place the
+// lessons). Free-hour compactness is the next big objective: every free hour of a
+// teacher subtracts GAP_HOUR_PENALTY, and any teacher with more than
+// BAD_TEACHER_GAP_HOURS weekly free hours adds a heavy BAD_TEACHER_PENALTY unless
+// it is a forced solution (no placement-complete alternative exists). Load
+// distribution quality only breaks ties between equally complete, equally compact
+// schedules. Pinned FORBID_LESSON rules that still miss hours are penalized hard
+// so the chosen attempt prioritizes the pinned load.
 function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState, pinnedRuleIds?: Set<string>): number {
   const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
   const placed = (schedules.semester1.score + schedules.semester2.score) / 2;
@@ -101,6 +196,8 @@ function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], pro
     + (schedules.semester2.conflicts || [])
       .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
       .reduce((sum, c) => sum + (c.missing ?? 1), 0);
+
+  const gap = combinedGapStats(schedules);
 
   const byTeacherDay = new Map<string, Map<string, number[]>>();
   for (const sem of [schedules.semester1.schedule, schedules.semester2.schedule]) {
@@ -112,21 +209,18 @@ function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], pro
       dmap.get(lesson.day)!.push(lesson.period);
     }
   }
+  // Small reward for leaving teachers with spread-out-but-gap-free days; this is a
+  // residual preference, the gap penalties above already do the heavy lifting.
   let distribution = 0;
   for (const dmap of byTeacherDay.values()) {
     for (const periods of dmap.values()) {
       periods.sort((a, b) => a - b);
       if (periods.length === 1) distribution -= 2;
-      for (let i = 1; i < periods.length; i++) {
-        const gap = periods[i] - periods[i - 1] - 1;
-        if (gap > 0) distribution -= gap;
-      }
     }
   }
 
   // Penalize deviation between the intended load distribution and the lessons that
-  // were actually placed, so the best schedule is the one whose per-semester loads
-  // are closest to the configured distribution.
+  // were actually placed; only breaks ties between otherwise-equal schedules.
   const intended = intendedLoads(project, splits);
   const actualTeacher = new Map<string, { s1: number; s2: number }>();
   const actualGroup = new Map<string, { s1: number; s2: number }>();
@@ -154,16 +248,31 @@ function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], pro
     deviation += Math.abs(g.s1 - a.s1) + Math.abs(g.s2 - a.s2);
   }
 
-  return placed * 1000 - unassigned - pinnedUnassigned * 500 + distribution * 0.01 - deviation * 0.01;
+  return placed * 1000
+    - unassigned
+    - pinnedUnassigned * 500
+    - gap.totalGapHours * GAP_HOUR_PENALTY
+    - gap.badTeachers * BAD_TEACHER_PENALTY
+    + distribution * 0.01
+    - deviation * 0.01;
 }
 
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
   const result = await runGenerate(project, emit);
-  emit({ type: 'RESULT', payload: result });
+  emit({
+    type: 'RESULT',
+    payload: { ...result, teacherGapStats: teacherGapReport(result.schedule) },
+  });
 }
 
-async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => void, rng?: () => number, pinnedRuleIds?: Set<string>): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+async function runGenerate(
+  project: ProjectState,
+  emit: (msg: WorkerMessage) => void,
+  rng?: () => number,
+  pinnedRuleIds?: Set<string>,
+  optimizePasses = DEFAULT_OPTIMIZE_PASSES
+): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
+  const days = DAYS;
   const allRooms = project.rooms || [];
 
   const groupConfig = new Map<string, GroupScheduleConfig>();
@@ -540,43 +649,32 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     return bonus;
   }
 
-  function teacherCompactnessFor(teacherId: string, day: string, period: number): number {
-    const periods: number[] = [];
-    for (const s of schedule) {
-      if (s.teacherId === teacherId && s.day === day) periods.push(s.period);
-    }
-    if (periods.length === 0) return 0;
-    periods.push(period);
-    periods.sort((a, b) => a - b);
-    let maxGap = 0;
-    for (let i = 1; i < periods.length; i++) {
-      maxGap = Math.max(maxGap, periods[i] - periods[i - 1] - 1);
-    }
-    return maxGap <= 2 ? 4 - maxGap : -3;
-  }
-
-  function teacherCompactnessScore(unit: SchedulingUnit, day: string, period: number): number {
-    let score = 0;
+  // How much a candidate slot would change the teacher's free-hour count. A
+  // negative value means the placement fills an existing gap; zero keeps the
+  // teacher gap-free (or starts a new day); a positive value creates new free
+  // hours and is the last option.
+  function placementGapDelta(unit: SchedulingUnit, day: string, period: number): number {
+    const extra = unit.type === 'double' ? [period, period + 1] : [period];
     const seen = new Set<string>();
+    let delta = 0;
     for (const lesson of unit.lessons) {
       if (!lesson.teacherId || seen.has(lesson.teacherId)) continue;
       seen.add(lesson.teacherId);
-      const s = teacherCompactnessFor(lesson.teacherId, day, period);
-      score = seen.size === 1 ? s : Math.min(score, s);
+      delta += extraPeriodsGapDelta(schedule, lesson.teacherId, day, extra);
     }
-    return score;
+    return delta;
   }
 
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
-      const ca = teacherCompactnessScore(unit, day, a);
-      const cb = teacherCompactnessScore(unit, day, b);
-      if (ca !== cb) return cb - ca;
+      const ga = placementGapDelta(unit, day, a);
+      const gb = placementGapDelta(unit, day, b);
+      if (ga !== gb) return ga - gb;
       const sa = gradeAdjacencyScore(unit, day, a);
       const sb = gradeAdjacencyScore(unit, day, b);
-       if (sa !== sb) return sb - sa;
-       return (a - b) + (rng ? rng() - 0.5 : 0);
+      if (sa !== sb) return sb - sa;
+      return (a - b) + (rng ? rng() - 0.5 : 0);
     });
   }
 
@@ -589,9 +687,17 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     const dayScores = days.map((day, di) => {
       const extra = unitSlotCount(unit);
       const fits = counts[di] + extra <= maxDaily;
+      if (!fits || counts[di] >= maxDaily) {
+        return { day, index: di, need: -999 };
+      }
+      let bestDelta = 0;
+      for (const p of getOrderedPeriods(unit, day)) {
+        const d = placementGapDelta(unit, day, p);
+        if (d < bestDelta) bestDelta = d;
+      }
       return {
         day, index: di,
-        need: counts[di] >= maxDaily || !fits ? -999 : (targets[di] - counts[di]) + teacherDayBonus(unit, di),
+        need: (targets[di] - counts[di]) + bestDelta + teacherDayBonus(unit, di),
       };
     });
     dayScores.sort((a, b) => (b.need - a.need) || ((rng ? rng() : 0) - 0.5));
@@ -641,12 +747,176 @@ async function runGenerate(project: ProjectState, emit: (msg: WorkerMessage) => 
     }
   }
 
+  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, rng, optimizePasses);
+
   const totalBatches = units.length;
   return {
     schedule,
     conflicts,
     score: totalBatches > 0 ? unitsAssigned / totalBatches : 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Local search: shrink teacher free gaps by swapping same-day lessons without
+// breaking any invariant (teacher/class/room slots, busy constraints, doubles,
+// split-slot simultaneity). Each accepted swap strictly reduces total free hours.
+// ---------------------------------------------------------------------------
+
+function slotFreeForSwap(
+  schedule: any[],
+  lesson: any,
+  day: string,
+  period: number,
+  excludeId: string,
+  teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
+  noFirstRules: { subjectId: string; groupId?: string }[],
+  groupConfig: Map<string, GroupScheduleConfig>
+): boolean {
+  for (const other of schedule) {
+    if (other.id === excludeId) continue;
+    if (other.day !== day || other.period !== period) continue;
+    if (other.groupId === lesson.groupId) return false;
+    if (lesson.teacherId && other.teacherId === lesson.teacherId) return false;
+    if (lesson.roomId && other.roomId === lesson.roomId) return false;
+  }
+  if (lesson.teacherId && isBusyRule(teacherBusyRules, lesson.teacherId, day, period)) return false;
+  const cfg = groupConfig.get(lesson.groupId);
+  if (cfg) {
+    if (period < cfg.periodStart || period > cfg.periodEnd) return false;
+    if (period === cfg.periodStart) {
+      if (noFirstRules.some(r => r.subjectId === lesson.subjectId && (!r.groupId || r.groupId === lesson.groupId))) return false;
+    }
+  }
+  return true;
+}
+
+function isBusyRule(teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[], teacherId: string, day: string, period: number): boolean {
+  for (const rule of teacherBusyRules) {
+    if (rule.teacherId !== teacherId) continue;
+    if (rule.day !== '*' && rule.day !== day) continue;
+    if (rule.periods.has(period)) return true;
+  }
+  return false;
+}
+
+function hasDoublePartner(schedule: any[], lesson: any): boolean {
+  return schedule.some(o =>
+    o.id !== lesson.id
+    && o.teacherId && o.teacherId === lesson.teacherId
+    && o.ruleId === lesson.ruleId
+    && o.day === lesson.day
+    && Math.abs(o.period - lesson.period) === 1
+  );
+}
+
+function hasSplitPartner(schedule: any[], lesson: any): boolean {
+  return schedule.some(o =>
+    o.id !== lesson.id
+    && o.day === lesson.day
+    && o.period === lesson.period
+    && o.groupId === lesson.groupId
+    && o.subjectId === lesson.subjectId
+  );
+}
+
+function canSameDaySwap(
+  schedule: any[],
+  a: any,
+  b: any,
+  teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
+  noFirstRules: { subjectId: string; groupId?: string }[],
+  groupConfig: Map<string, GroupScheduleConfig>
+): boolean {
+  if (a.day !== b.day || a.period === b.period) return false;
+  if (hasDoublePartner(schedule, a) || hasDoublePartner(schedule, b)) return false;
+  if (hasSplitPartner(schedule, a) || hasSplitPartner(schedule, b)) return false;
+  // a -> b's slot, b -> a's slot (same day, group/room/teacher slots checked).
+  if (!slotFreeForSwap(schedule, a, a.day, b.period, b.id, teacherBusyRules, noFirstRules, groupConfig)) return false;
+  if (!slotFreeForSwap(schedule, b, a.day, a.period, a.id, teacherBusyRules, noFirstRules, groupConfig)) return false;
+  return true;
+}
+
+function swapGapDelta(schedule: any[], a: any, b: any): number {
+  const day = a.day;
+  const tOld = teacherDayGap(schedule, a.teacherId, day);
+  const xOld = teacherDayGap(schedule, b.teacherId, day);
+  const tp = dayPeriodsOf(schedule, a.teacherId, day).filter(p => p !== a.period);
+  tp.push(b.period);
+  tp.sort((m, n) => m - n);
+  const xp = dayPeriodsOf(schedule, b.teacherId, day).filter(p => p !== b.period);
+  xp.push(a.period);
+  xp.sort((m, n) => m - n);
+  return (gapOfPeriods(tp) + gapOfPeriods(xp)) - (tOld + xOld);
+}
+
+function optimizeGaps(
+  schedule: any[],
+  teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
+  noFirstRules: { subjectId: string; groupId?: string }[],
+  groupConfig: Map<string, GroupScheduleConfig>,
+  rng: (() => number) | undefined,
+  maxPasses: number
+): void {
+  if (schedule.length === 0) return;
+
+  const dayMap = new Map<string, number[]>();
+  for (const lesson of schedule) {
+    if (!lesson.teacherId) continue;
+    const key = `${lesson.teacherId}|${lesson.day}`;
+    if (!dayMap.has(key)) dayMap.set(key, []);
+    dayMap.get(key)!.push(lesson.period);
+  }
+
+  const gapped: { tid: string; day: string; periods: number[] }[] = [];
+  for (const [key, periods] of dayMap) {
+    periods.sort((a, b) => a - b);
+    if (gapOfPeriods(periods) > 0) {
+      const sep = key.indexOf('|');
+      gapped.push({ tid: key.slice(0, sep), day: key.slice(sep + 1), periods });
+    }
+  }
+  if (gapped.length === 0) return;
+
+  for (let pass = 0; pass < maxPasses; pass++) {
+    if (rng) shuffleInPlace(gapped, rng);
+    let improved = false;
+
+    for (const entry of gapped) {
+      // Entry state may be stale after a swap; recompute its periods cheaply.
+      const periods = dayPeriodsOf(schedule, entry.tid, entry.day);
+      if (periods.length < 2 || gapOfPeriods(periods) <= 0) continue;
+
+      outer:
+      for (let i = 1; i < periods.length; i++) {
+        const pPrev = periods[i - 1];
+        const pCur = periods[i];
+        // Consider every free cell strictly inside this gap and pick the best swap.
+        let bestSwap: { a: any; b: any; delta: number } | null = null;
+        for (let cell = pPrev + 1; cell < pCur; cell++) {
+          const bLesson = schedule.find(l => l.day === entry.day && l.period === cell);
+          if (!bLesson || bLesson.teacherId === entry.tid) continue;
+          for (const target of [pPrev, pCur]) {
+            const aLesson = schedule.find(l => l.teacherId === entry.tid && l.day === entry.day && l.period === target);
+            if (!aLesson || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig)) continue;
+            const delta = swapGapDelta(schedule, aLesson, bLesson);
+            if (bestSwap === null || delta < bestSwap.delta) {
+              bestSwap = { a: aLesson, b: bLesson, delta };
+            }
+          }
+        }
+        if (bestSwap && bestSwap.delta < 0) {
+          const bp = bestSwap.b.period;
+          bestSwap.b.period = bestSwap.a.period;
+          bestSwap.a.period = bp;
+          improved = true;
+          break outer;
+        }
+      }
+    }
+
+    if (!improved) break;
+  }
 }
 
 export function computeSemesterSplits(project: ProjectState): SemesterSplit[] {
@@ -745,9 +1015,10 @@ function collectUnassigned(result: ScheduleResult): Map<string, number> {
 
 export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void, settings?: Partial<GenerateSettings>) {
   // Generate many candidate schedules and keep the one that places the most
-  // lessons while producing the tidyest teacher distribution.
+  // lessons while producing the tightest teacher free-hour distribution.
   const attempts = clampInt(settings?.attempts ?? 20, 1, 200);
   const maxSpillPasses = clampInt(settings?.maxSpillPasses ?? 4, 0, 20);
+  const optimizePasses = clampInt(settings?.optimizePasses ?? DEFAULT_OPTIMIZE_PASSES, 0, 60);
 
   // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
   // the spillover must not move lessons across (respecting the forbid).
@@ -775,7 +1046,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
           const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
           emit({ type: 'PROGRESS', payload: { progress: Math.round(progressBase + (p / 100) * progressSpan) } });
         }
-      }, rng, fixedRules);
+      }, rng, fixedRules, optimizePasses);
     };
 
     let splits = computeSemesterSplits(project);
@@ -846,6 +1117,10 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
       splits: best!.splits,
       attempts,
       bestQuality: best!.quality,
+      gapReport: {
+        semester1: teacherGapReport(best!.schedules.semester1.schedule),
+        semester2: teacherGapReport(best!.schedules.semester2.schedule),
+      },
     },
   });
 }

@@ -139,6 +139,8 @@ export interface GenerateSettings {
   attempts: number;
   /** How many times unplaced lessons may be re-distributed between semesters. */
   maxSpillPasses: number;
+  /** How many improvement passes run to shrink teacher free gaps after placement. */
+  optimizePasses?: number;
 }
 
 export interface ProjectState {

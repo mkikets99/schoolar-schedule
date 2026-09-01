@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "createdAt": "2026-09-01",
+  "lastAnalysis": "2026-09-01",
+  "project": {
+    "name": "schoolar-schedule",
+    "version": "0.1.0",
+    "description": "Client-side school scheduling application",
+    "repo": "https://github.com/mkikets99/schoolar-schedule",
+    "branch": "main",
+    "latestCommit": "867b32c - Add Ctrl+click generation settings modal",
+    "totalCommits": 95,
+    "remote": "origin/main (up to date)",
+    "untrackedFiles": [
+      "real_test2.json",
+      "real_test3.json",
+      "real_test4.json"
+    ],
+    "note": "These are test data JSON files not covered by .gitignore (*.schoolproj is ignored but *.json is not)"
+  },
+  "stack": {
+    "ui": "React 18 + Vite 4 + TypeScript 5",
+    "state": "React Context + IndexedDB (StorageService)",
+    "scheduling": "Web Worker (generator.ts, 851 lines)",
+    "i18n": "i18next (en, uk)",
+    "export": "jsPDF + ExcelJS + JSZip + PapaParse + xlsx",
+    "testing": "Vitest + @testing-library/react + jsdom",
+    "ci": "GitHub Actions -> GitHub Pages"
+  },
+  "architecture": {
+    "entryPoints": {
+      "index.html": "Vite entry, loads src/ui/main.tsx",
+      "src/ui/main.tsx": "React root + i18n init",
+      "src/ui/App.tsx": "Main app shell, nav, worker management, generation trigger"
+    },
+    "worker": {
+      "src/worker/worker.ts": "Message handler, dispatches to generator",
+      "src/worker/generator.ts": "Core scheduling engine (851 lines). Semester-split generation, multi-attempt best-of, spill passes, scoring"
+    },
+    "shared": {
+      "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings, ProjectState, computeGroupScheduleConfig()",
+      "src/shared/eligibility.ts": "canTeachSubject, eligibleTeachers, eligibleTeacherOptions"
+    },
+    "context": {
+      "src/ui/context/ProjectContext.tsx": "ProjectProvider, useProject hook. All CRUD updates + autosave to IndexedDB"
+    },
+    "services": {
+      "src/ui/services/StorageService.ts": "IndexedDB persistence",
+      "src/ui/services/ExportService.ts": "PDF/XLSX export with matrix rendering (939 lines), hidden JSON schedule export",
+      "src/ui/services/ProjectExportService.ts": ".schoolproj import/export",
+      "src/ui/services/CSVImportService.ts": "CSV/TSV/XLSX import",
+      "src/ui/services/UniversalImportService.ts": "Unified import adapter",
+      "src/ui/services/scheduleAnalyzer.ts": "Empty slot reason analysis"
+    },
+    "components": {
+      "App.tsx": "Root layout, nav, worker lifecycle",
+      "ScheduleViewer.tsx": "Schedule grid, stats, filters, modals (585 lines)",
+      "InlineEditor.tsx": "Drag-drop schedule editing (group/teacher modes)",
+      "CurriculumEditor.tsx": "Curriculum rules CRUD",
+      "ConstraintEditor.tsx": "Constraints CRUD with multi-select",
+      "TeacherEditor.tsx": "Teacher CRUD",
+      "SubjectEditor.tsx": "Subject CRUD",
+      "RoomEditor.tsx": "Room CRUD",
+      "GroupEditor.tsx": "Group CRUD (with grade, shift, maxDaily)",
+      "LoadDistributionUI.tsx": "Teacher load matrix",
+      "GenerateModal.tsx": "Generation settings (attempts, spill passes)",
+      "ExportModal.tsx": "PDF/XLSX export config",
+      "ImportWizard.tsx": "Multi-format import wizard",
+      "ProjectManager.tsx": "Create/open/export projects",
+      "SchoolEditor.tsx": "School info editor",
+      "Modal.tsx": "Reusable modal",
+      "SearchableSelect.tsx": "Searchable dropdown",
+      "MultiSelect.tsx": "Multi-select with select-all",
+      "InlineEditor.tsx": "Schedule grid editor"
+    }
+  },
+  "dataModel": {
+    "School": { "fields": ["id", "name", "address?"] },
+    "AcademicYear": { "fields": ["id", "name", "startDate", "endDate"] },
+    "Teacher": { "fields": ["id", "name", "shortName?", "subjects[]", "color?"] },
+    "Subject": { "fields": ["id", "name", "shortName?", "color?"] },
+    "Room": { "fields": ["id", "name", "capacity?", "types[]"] },
+    "Group": { "fields": ["id", "name", "grade", "subgroups[]", "parentGroupId?", "periodStart?", "periodEnd?", "maxDailyLessons?"] },
+    "CurriculumRule": { "fields": ["id", "groupId", "subjectId", "hoursPerWeek", "teacherId?", "roomId?", "doubleLesson?"] },
+    "LoadDistribution": { "fields": ["teacherId", "subjectId", "groupId", "hours"] },
+    "Constraint": { "fields": ["id", "kind", "teacherId?", "day?", "periods[]", "subjectId?", "groupId?", "ruleId?", "semester?", "hours?", "maxPerDay?"], "kinds": ["TEACHER_BUSY", "NO_FIRST_PERIOD", "FORBID_LESSON", "MAX_DAILY_LESSONS"] },
+    "Lesson": { "fields": ["id", "ruleId", "groupId", "subjectId", "teacherId?", "roomId?", "day", "period"] },
+    "ScheduleResult": { "fields": ["schedule[]", "conflicts[]", "score"] },
+    "SemesterSplit": { "fields": ["ruleId", "hoursPerWeek", "first", "second"] },
+    "SemesterSchedules": { "fields": ["semester1", "semester2"] },
+    "GenerateSettings": { "fields": ["attempts", "maxSpillPasses"] },
+    "ProjectState": { "fields": ["version", "school", "academicYears[]", "teachers[]", "subjects[]", "rooms[]", "groups[]", "curriculum[]", "loadDistribution[]", "constraints[]", "generatedSchedule?", "generatedSchedules?", "generatedSplits?"] }
+  },
+  "schedulingEngine": {
+    "approach": "Greedy placement with multi-attempt randomization",
+    "semesterSplit": "Automatic per-rule semester splitting, with FORBID_LESSON override",
+    "spillover": "Unplaced lessons cascade between semesters for fractional rules",
+    "attempts": "Generates N candidate schedules, scores each, keeps best",
+    "scoring": "Placement completeness dominates; teacher distribution compactness + load deviation as tiebreakers; pinned FORBID_LESSON rules penalized 500x",
+    "constraints": ["TEACHER_BUSY", "NO_FIRST_PERIOD", "FORBID_LESSON", "MAX_DAILY_LESSONS"],
+    "features": ["double lessons", "split subjects (teacher rotation)", "room fallback", "grade adjacency preference", "teacher same-day compactness", "configurable group shift windows", "PRNG per attempt"]
+  },
+  "tests": {
+    "framework": "Vitest",
+    "count": 151,
+    "files": 14,
+    "status": "ALL PASSING",
+    "testFiles": [
+      "src/test/worker/worker.test.ts",
+      "src/test/worker/semesterSplit.test.ts",
+      "src/test/worker/realProject.test.ts",
+      "src/test/shared/types.test.ts",
+      "src/test/services/ProjectExportService.test.ts",
+      "src/test/services/CSVImportService.test.ts",
+      "src/test/services/UniversalImportService.test.ts",
+      "src/test/services/StorageService.test.ts",
+      "src/test/services/scheduleAnalyzer.test.ts",
+      "src/test/components/MultiSelect.test.tsx",
+      "src/test/components/Modal.test.tsx",
+      "src/test/components/InlineEditor.test.tsx",
+      "src/test/components/GenerateModal.test.tsx",
+      "src/test/components/ConstraintEditor.test.tsx"
+    ]
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "completedTasks": [],
+  "pendingTasks": [],
+  "notes": [
+    "Project is fully client-side, offline-first, runs on GitHub Pages",
+    "All state persisted to IndexedDB with autosave",
+    ".schoolproj files are JSON-based with schema versioning",
+    "2026-09-01: All 151 tests pass, branch clean (3 untracked test JSON files)",
+    "Generator uses deterministic PRNG (mulberry32) for reproducible attempts",
+    "Lock/unlock in schedule viewer is UI-only state (not persisted)"
+  ]
+}
