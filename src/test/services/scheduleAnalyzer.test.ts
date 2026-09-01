@@ -145,6 +145,65 @@ describe('analyzeSchedule', () => {
     expect(a.byLesson.get('l2')).toBeUndefined();
   });
 
+  it('flags a rule that exceeds its load-distribution auto limit', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'rule-l1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 4, teacherId: 't1' },
+      ],
+      loadDistribution: [
+        { teacherId: 't1', subjectId: 'subj1', groupId: 'g1', hours: 4 },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 2, { ruleId: 'rule-l1', teacherId: 't1' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.DAILY_RULE);
+    expect(a.byLesson.get('l2')).toContain(CONFLICT_REASON.DAILY_RULE);
+  });
+
+  it('flags a >5h load auto-limited to 2 per day', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'rule-l1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 8, teacherId: 't1' },
+      ],
+      loadDistribution: [
+        { teacherId: 't1', subjectId: 'subj1', groupId: 'g1', hours: 8 },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('l2', 'g1', 'subj1', 'Monday', 2, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('l3', 'g1', 'subj1', 'Monday', 3, { ruleId: 'rule-l1', teacherId: 't1' }),
+    ];
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.DAILY_RULE);
+    expect(a.byLesson.get('l3')).toContain(CONFLICT_REASON.DAILY_RULE);
+  });
+
+  it('marks empty slots blocked by the load-distribution auto limit', () => {
+    const project = makeProject({
+      curriculum: [
+        { id: 'rule-l1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 4, teacherId: 't1' },
+      ],
+      loadDistribution: [
+        { teacherId: 't1', subjectId: 'subj1', groupId: 'g1', hours: 4 },
+      ],
+    });
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { ruleId: 'rule-l1', teacherId: 't1' }),
+    ];
+    const pool = [
+      lesson('p1', 'g1', 'subj1', '', 0, { ruleId: 'rule-l1', teacherId: 't1' }),
+      lesson('p2', 'g1', 'subj1', '', 0, { ruleId: 'rule-l1', teacherId: 't1' }),
+    ];
+    const pending = buildPendingByRule(placed, pool);
+    const empty = analyzeEmptySlots(placed, project, pending);
+    expect(empty.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.DAILY_RULE);
+    expect(empty.get('g1|Tuesday|1')).toContain(EMPTY_SLOT_REASON.DAY_BALANCE);
+  });
+
   it('does not flag no-first-period when not the first period', () => {
     const project = makeProject({}, [{ id: 'c2', kind: 'NO_FIRST_PERIOD', subjectId: 'subj1', groupId: 'g1' }]);
     const placed = [lesson('l1', 'g1', 'subj1', 'Monday', 2)];

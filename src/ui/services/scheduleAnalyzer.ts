@@ -1,4 +1,4 @@
-import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig } from '../../shared/types';
+import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig, buildMaxDailyByRule } from '../../shared/types';
 
 export const CONFLICT_REASON = {
   TEACHER_SLOT: 'conflict_teacher_slot',
@@ -118,12 +118,7 @@ export function analyzeEmptySlots(
     }
   }
 
-  const maxDailyByRule = new Map<string, number>();
-  for (const c of project.constraints || []) {
-    if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
-      maxDailyByRule.set(c.ruleId, c.maxPerDay);
-    }
-  }
+  const maxDailyByRule = buildMaxDailyByRule(project);
   const ruleDayCounts = new Map<string, Map<string, number>>();
   for (const lesson of placed) {
     if (!maxDailyByRule.has(lesson.ruleId)) continue;
@@ -287,16 +282,14 @@ export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: Proje
   const groupMap = new Map(project.groups.map(g => [g.id, g]));
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
-  const maxDailyByRule = new Map<string, number>();
   for (const c of project.constraints || []) {
     if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
       teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
     } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
       noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
-    } else if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
-      maxDailyByRule.set(c.ruleId, c.maxPerDay);
     }
   }
+  const maxDailyByRule = buildMaxDailyByRule(project);
 
   const dailySlots = new Map<string, Set<string>>();
   for (const lesson of placed) {

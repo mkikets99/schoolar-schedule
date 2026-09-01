@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Constraint, ConstraintKind } from '../../shared/types';
+import { Constraint, ConstraintKind, autoMaxPerDay } from '../../shared/types';
 import { useProject } from '../context/ProjectContext';
 import { Modal, FormField } from './Modal';
 import { useTableControls, TableSearch, SortableTh } from './TableControls';
@@ -332,6 +332,19 @@ export const ConstraintEditor = () => {
 
   const canAdd = teachers.length > 0 || subjects.length > 0;
 
+  const explicitMaxDailyIds = new Set(
+    (project?.constraints || [])
+      .filter(c => c.kind === 'MAX_DAILY_LESSONS' && c.ruleId)
+      .map(c => c.ruleId!)
+  );
+  const autoLimits = (project?.curriculum || [])
+    .map(rule => ({
+      rule,
+      cap: autoMaxPerDay(rule, project?.loadDistribution || []),
+      overridden: explicitMaxDailyIds.has(rule.id),
+    }))
+    .filter(x => x.cap !== undefined);
+
   return (
     <div className="entity-editor">
       <div className="view-header">
@@ -358,6 +371,24 @@ export const ConstraintEditor = () => {
 
       <p className="section-desc">{t('constraints_desc')}</p>
       <p className="section-desc">{t('constraints_affect_gen')}</p>
+
+      {autoLimits.length > 0 && (
+        <div className="auto-limits-panel">
+          <h3 className="auto-limits-title">{t('auto_daily_limits')}</h3>
+          <p className="section-desc">{t('auto_daily_limits_desc')}</p>
+          <ul className="auto-limits-list">
+            {autoLimits.map(({ rule, cap, overridden }) => (
+              <li key={rule.id} className={`auto-limits-row${overridden ? ' overridden' : ''}`}>
+                <span className="auto-limits-label">{ruleLabel(rule.id)}</span>
+                <span className="auto-limits-value">
+                  {t('at_most')} {cap} {t(cap === 1 ? 'lesson_per_day' : 'lessons_per_day')}
+                </span>
+                {overridden && <span className="constraint-badge max-daily">{t('auto_limit_overridden')}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!canAdd && <p className="empty-hint">{t('no_teachers_no_subjects')}</p>}
 

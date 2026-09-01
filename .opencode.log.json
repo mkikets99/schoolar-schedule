@@ -4,19 +4,15 @@
   "lastAnalysis": "2026-09-01",
   "project": {
     "name": "schoolar-schedule",
-    "version": "0.1.0",
+    "version": "0.2.1",
     "description": "Client-side school scheduling application",
     "repo": "https://github.com/mkikets99/schoolar-schedule",
     "branch": "main",
-    "latestCommit": "867b32c - Add Ctrl+click generation settings modal",
+    "latestCommit": "a19a137 - feat(worker): select best attempt by unresolved count, not percentage (0.2.1 auto daily-limit work follows)",
     "totalCommits": 95,
     "remote": "origin/main (up to date)",
-    "untrackedFiles": [
-      "real_test2.json",
-      "real_test3.json",
-      "real_test4.json"
-    ],
-    "note": "These are test data JSON files not covered by .gitignore (*.schoolproj is ignored but *.json is not)"
+    "untrackedFiles": [],
+    "note": "0.2.1: automatic MAX_DAILY_LESSONS limits derived from the load distribution"
   },
   "stack": {
     "ui": "React 18 + Vite 4 + TypeScript 5",
@@ -38,7 +34,7 @@
       "src/worker/generator.ts": "Core scheduling engine (851 lines). Semester-split generation, multi-attempt best-of, spill passes, scoring"
     },
     "shared": {
-      "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings, ProjectState, computeGroupScheduleConfig()",
+      "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings, ProjectState, computeGroupScheduleConfig(), autoMaxPerDay(), buildMaxDailyByRule()",
       "src/shared/eligibility.ts": "canTeachSubject, eligibleTeachers, eligibleTeacherOptions"
     },
     "context": {
@@ -98,18 +94,22 @@
     "attempts": "Generates N candidate schedules, scores each, keeps best",
     "scoring": "Placement completeness dominates; teacher distribution compactness + load deviation as tiebreakers; pinned FORBID_LESSON rules penalized 500x",
     "constraints": ["TEACHER_BUSY", "NO_FIRST_PERIOD", "FORBID_LESSON", "MAX_DAILY_LESSONS"],
-    "features": ["double lessons", "split subjects (teacher rotation)", "room fallback", "grade adjacency preference", "teacher same-day compactness", "configurable group shift windows", "PRNG per attempt"]
+    "autoMaxPerDay": "Derived from the load distribution: >5 weekly hours -> 2 lessons/day, <=5 -> 1/day, doubleLesson keeps a pair (2/day). Explicit MAX_DAILY_LESSONS constraints override. Applied in generator and edit-mode analyzer; shown in ConstraintEditor.",
+    "features": ["double lessons", "split subjects (teacher rotation)", "room fallback", "grade adjacency preference", "teacher same-day compactness", "configurable group shift windows", "PRNG per attempt", "automatic MAX_DAILY_LESSONS from load distribution"]
   },
   "tests": {
     "framework": "Vitest",
-    "count": 151,
-    "files": 14,
+    "count": 175,
+    "files": 17,
     "status": "ALL PASSING",
     "testFiles": [
       "src/test/worker/worker.test.ts",
       "src/test/worker/semesterSplit.test.ts",
       "src/test/worker/realProject.test.ts",
+      "src/test/worker/gapOptimization.test.ts",
+      "src/test/worker/autoDailyLimit.test.ts",
       "src/test/shared/types.test.ts",
+      "src/test/shared/dailyLimit.test.ts",
       "src/test/services/ProjectExportService.test.ts",
       "src/test/services/CSVImportService.test.ts",
       "src/test/services/UniversalImportService.test.ts",
@@ -130,13 +130,22 @@
     "test:watch": "vitest",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
-  "completedTasks": [],
-  "pendingTasks": [],
+  "completedTasks": [
+    {
+      "id": "v0.2.1-auto-daily-limit",
+      "date": "2026-09-01",
+      "title": "Automatic MAX_LESSON_PER_DAY (MAX_DAILY_LESSONS) from load distribution",
+      "body": "Changed the per-subject daily lesson limit logic: the effective MAX_DAILY_LESSONS is now derived automatically from the load distribution (a lesson is limited to 2 per day when its weekly load exceeds 5 hours, otherwise 1 per day; doubleLesson rules keep their pair allowance). Explicit MAX_DAILY_LESSONS constraints override the automatic value. autoMaxPerDay() + buildMaxDailyByRule() added in src/shared/types.ts and reused by the generator (src/worker/generator.ts), the edit-mode analyzer (src/ui/services/scheduleAnalyzer.ts), and shown read-only in ConstraintEditor with new i18n keys (auto_daily_limits, auto_daily_limits_desc, auto_limit_overridden). Tests: src/test/shared/dailyLimit.test.ts, src/test/worker/autoDailyLimit.test.ts, +4 analyzer cases. Full suite 175 tests / 17 files green; npm run build green."
+    }
+  ],
+  "pendingTasks": [
+    "0.2.1 remainder (in-progress from prior turn): AI Rearrangement (worker-side suggestion engine src/worker/rearrange.ts, REARRANGE message type, edit-mode confirm modal, reuse at generation), fluent generation progress UI (PROGRESS emissions per attempt with best-quality status), UI fixes (View/Edit toggling in ScheduleViewer, Edit teacher in schedule in InlineEditor), expose optimizePasses in GenerateModal"
+  ],
   "notes": [
     "Project is fully client-side, offline-first, runs on GitHub Pages",
     "All state persisted to IndexedDB with autosave",
     ".schoolproj files are JSON-based with schema versioning",
-    "2026-09-01: All 151 tests pass, branch clean (3 untracked test JSON files)",
+    "2026-09-01: All 175 tests pass (17 files); automatic daily limits committed as part of v0.2.1",
     "Generator uses deterministic PRNG (mulberry32) for reproducible attempts",
     "Lock/unlock in schedule viewer is UI-only state (not persisted)"
   ]

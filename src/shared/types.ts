@@ -159,6 +159,53 @@ export interface ProjectState {
   generatedSplits?: SemesterSplit[];
 }
 
+/**
+ * Automatic per-rule daily lesson limit derived from the load distribution.
+ *
+ * A lesson may appear at most once per day when its weekly load is 5 hours or
+ * less, and at most twice per day when the load exceeds 5 hours. Rules marked
+ * `doubleLesson` always keep their pair allowance (2 lessons per day). Returns
+ * `undefined` when no load-distribution entry matches the rule, so only an
+ * explicit MAX_DAILY_LESSONS constraint can limit it.
+ */
+export function autoMaxPerDay(rule: CurriculumRule, loadDistribution: LoadDistribution[]): number | undefined {
+  if (!loadDistribution || loadDistribution.length === 0) return undefined;
+  let matches = loadDistribution.filter(
+    (l) => l.groupId === rule.groupId && l.subjectId === rule.subjectId
+  );
+  if (rule.teacherId) {
+    const byTeacher = matches.filter((l) => l.teacherId === rule.teacherId);
+    if (byTeacher.length > 0) matches = byTeacher;
+  }
+  if (matches.length === 0) return undefined;
+  const hours = matches.reduce((sum, l) => sum + (l.hours || 0), 0);
+  if (!(hours > 0)) return undefined;
+  if (rule.doubleLesson) return 2;
+  return hours > 5 ? 2 : 1;
+}
+
+/**
+ * Resolve the effective per-rule daily lesson limit. Explicit
+ * MAX_DAILY_LESSONS constraints win; otherwise the load-distribution-derived
+ * automatic limit from {@link autoMaxPerDay} applies.
+ */
+export function buildMaxDailyByRule(
+  project: Pick<ProjectState, 'curriculum' | 'constraints' | 'loadDistribution'>
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of project.constraints || []) {
+    if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
+      map.set(c.ruleId, c.maxPerDay);
+    }
+  }
+  for (const rule of project.curriculum || []) {
+    if (map.has(rule.id)) continue;
+    const auto = autoMaxPerDay(rule, project.loadDistribution || []);
+    if (auto !== undefined) map.set(rule.id, auto);
+  }
+  return map;
+}
+
 export type WorkerMessageType = 
   | 'INIT' 
   | 'READY' 

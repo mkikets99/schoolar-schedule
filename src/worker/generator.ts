@@ -1,4 +1,4 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule } from '../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -293,16 +293,18 @@ async function runGenerate(
 
   const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
-  const maxDailyByRule = new Map<string, number>();
   for (const c of project.constraints || []) {
     if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
       teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
     } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
       noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
-    } else if (c.kind === 'MAX_DAILY_LESSONS' && c.ruleId && c.maxPerDay && c.maxPerDay > 0) {
-      maxDailyByRule.set(c.ruleId, c.maxPerDay);
     }
   }
+
+  // Per-rule daily lesson limits: explicit MAX_DAILY_LESSONS constraints win,
+  // otherwise the limit is derived automatically from the load distribution
+  // (>5 weekly hours -> 2 lessons/day, otherwise 1/day, doubles keep a pair).
+  const maxDailyByRule = buildMaxDailyByRule(project);
 
   const teacherBusy = new Set<string>();
   const groupBusy = new Set<string>();
