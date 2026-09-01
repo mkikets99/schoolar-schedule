@@ -273,7 +273,6 @@ async function runGenerate(
   optimizePasses = DEFAULT_OPTIMIZE_PASSES
 ): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = DAYS;
-  const allRooms = project.rooms || [];
 
   const groupConfig = new Map<string, GroupScheduleConfig>();
   for (const group of project.groups || []) {
@@ -455,22 +454,6 @@ async function runGenerate(
 
   emit({ type: 'PROGRESS', payload: { progress: 5 } });
 
-  function getRoomTypes(roomId: string): string[] {
-    const room = allRooms.find(r => r.id === roomId);
-    return room ? room.types : [];
-  }
-
-  function findFallbackRoom(preferredId: string, slotKey: string): string | undefined {
-    const prefTypes = getRoomTypes(preferredId);
-    const fallback = allRooms.find(r => {
-      if (roomBusy.has(`${r.id}-${slotKey}`)) return false;
-      if (r.capacity === undefined) return false;
-      if (prefTypes.length > 0 && !prefTypes.some(t => r.types.includes(t))) return false;
-      return true;
-    });
-    return fallback?.id;
-  }
-
   function isTeacherBusyRule(teacherId: string, day: string, period: number): boolean {
     for (const rule of teacherBusyRules) {
       if (rule.teacherId !== teacherId) continue;
@@ -500,20 +483,15 @@ async function runGenerate(
       const counts = ruleDailyCounts.get(lesson.ruleId)!;
       if (counts[di] >= cap) return false;
     }
-    if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
-      const alt = findFallbackRoom(lesson.roomId, slotKey);
-      if (!alt) return false;
-    }
+    // A room assigned to a rule is forced: if it is taken at this slot the
+    // placement must look elsewhere - never silently substitute another room.
+    if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) return false;
     return true;
   }
 
   function placeLesson(lesson: LessonStub, day: string, period: number) {
     const slotKey = `${day}-${period}`;
-    let roomId = lesson.roomId;
-    if (roomId && roomBusy.has(`${roomId}-${slotKey}`)) {
-      const alt = findFallbackRoom(roomId, slotKey);
-      if (alt) roomId = alt;
-    }
+    const roomId = lesson.roomId;
 
     schedule.push({
       id: lesson.id,
@@ -530,7 +508,7 @@ async function runGenerate(
     const firstInSlot = !groupBusy.has(groupSlotKey);
     groupBusy.add(groupSlotKey);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
-    roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
+    if (roomId) roomBusy.add(`${roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
     if (di >= 0) {

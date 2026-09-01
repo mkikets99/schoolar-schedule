@@ -30,3 +30,4 @@ src/locales/*
 
 # Test data / sample school files
 *.schoolproj
+real_test*.json

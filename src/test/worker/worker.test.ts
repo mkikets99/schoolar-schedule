@@ -9,7 +9,6 @@ interface GroupScheduleConfig {
 
 async function generateTestSchedule(project: ProjectState) {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const allRooms = project.rooms || [];
 
   const groupConfig = new Map<string, GroupScheduleConfig>();
   for (const group of project.groups || []) {
@@ -188,22 +187,6 @@ async function generateTestSchedule(project: ProjectState) {
   const schedule: any[] = [];
   const conflicts: any[] = [];
 
-  function getRoomTypes(roomId: string): string[] {
-    const room = allRooms.find(r => r.id === roomId);
-    return room ? room.types : [];
-  }
-
-  function findFallbackRoom(preferredId: string, slotKey: string): string | undefined {
-    const prefTypes = getRoomTypes(preferredId);
-    const fallback = allRooms.find(r => {
-      if (roomBusy.has(`${r.id}-${slotKey}`)) return false;
-      if (r.capacity === undefined) return false;
-      if (prefTypes.length > 0 && !prefTypes.some(t => r.types.includes(t))) return false;
-      return true;
-    });
-    return fallback?.id;
-  }
-
   function isTeacherBusyRule(teacherId: string, day: string, period: number): boolean {
     for (const rule of teacherBusyRules) {
       if (rule.teacherId !== teacherId) continue;
@@ -220,6 +203,8 @@ async function generateTestSchedule(project: ProjectState) {
     );
   }
 
+  // A room assigned to a rule is forced: if it is taken at this slot the
+  // placement must look elsewhere - never silently substitute another room.
   function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean): boolean {
     const slotKey = `${day}-${period}`;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
@@ -227,20 +212,13 @@ async function generateTestSchedule(project: ProjectState) {
     if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
     const cfg = groupConfig.get(lesson.groupId);
     if (isForbiddenFirstPeriod(lesson, period, cfg?.periodStart ?? 1)) return false;
-    if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) {
-      const alt = findFallbackRoom(lesson.roomId, slotKey);
-      if (!alt) return false;
-    }
+    if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) return false;
     return true;
   }
 
   function placeLesson(lesson: LessonStub, day: string, period: number) {
     const slotKey = `${day}-${period}`;
-    let roomId = lesson.roomId;
-    if (roomId && roomBusy.has(`${roomId}-${slotKey}`)) {
-      const alt = findFallbackRoom(roomId, slotKey);
-      if (alt) roomId = alt;
-    }
+    const roomId = lesson.roomId;
 
     schedule.push({
       id: lesson.id,
@@ -257,7 +235,7 @@ async function generateTestSchedule(project: ProjectState) {
     const firstInSlot = !groupBusy.has(groupSlotKey);
     groupBusy.add(groupSlotKey);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
-    roomBusy.add(`${roomId || lesson.roomId}-${slotKey}`);
+    if (roomId) roomBusy.add(`${roomId}-${slotKey}`);
 
     const di = days.indexOf(day);
     if (di >= 0) {
@@ -765,7 +743,7 @@ describe('Worker scheduling algorithm', () => {
     }
   });
 
-  it('falls back only to same-type room when preferred room is busy', async () => {
+  it('forces the exact room on a rule and never substitutes another', async () => {
     const project = makeProject({
       rooms: [
         { id: 'r1', name: 'Lab A', capacity: 18, types: ['computer-lab'] },
@@ -784,12 +762,51 @@ describe('Worker scheduling algorithm', () => {
 
     const result = await generateTestSchedule(project);
 
+    // r1 is only used by c1: it has enough free slots for the full 8 lessons,
+    // so every lesson must land in exactly r1 (nothing silently moved to r2).
+    const c1Lessons = result.schedule.filter((l: any) => l.ruleId === 'c1');
+    const c2Lessons = result.schedule.filter((l: any) => l.ruleId === 'c2');
+    expect(c1Lessons).toHaveLength(8);
+    expect(c1Lessons.every((l: any) => l.roomId === 'r1')).toBe(true);
+    expect(c2Lessons).toHaveLength(8);
+    expect(c2Lessons.every((l: any) => l.roomId === 'r3')).toBe(true);
+    expect(result.conflicts).toHaveLength(0);
+  });
+
+  it('reports unassigned lessons instead of substituting a busy forced room', async () => {
+    // g1 only schedules periods 1-2 (10 slots/week). Three 5h rules all force
+    // the single room r1: 15 lessons compete for r1's 10 weekly slots. r2/r3
+    // exist as plausible substitutes, but the worker must never use them.
+    const project = makeProject({
+      rooms: [
+        { id: 'r1', name: 'Only Lab', capacity: 18, types: ['computer-lab'] },
+        { id: 'r2', name: 'Classroom A', capacity: 30, types: ['classroom'] },
+        { id: 'r3', name: 'Classroom B', capacity: 30, types: ['classroom'] },
+      ],
+      groups: [
+        { id: 'g1', name: '10-A', grade: 10, subgroups: [], periodStart: 1, periodEnd: 2, maxDailyLessons: 2 },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g1', subjectId: 'subj-info', hoursPerWeek: 5, teacherId: 't2', roomId: 'r1' },
+        { id: 'c3', groupId: 'g1', subjectId: 'subj-physics', hoursPerWeek: 5, teacherId: 't3', roomId: 'r1' },
+      ],
+    });
+
+    const result = await generateTestSchedule(project);
+
+    // Every placed lesson keeps the forced room - never a substitute.
+    expect(result.schedule.length).toBeGreaterThan(0);
     for (const lesson of result.schedule) {
-      const room = project.rooms.find(r => r.id === lesson.roomId);
-      if (lesson.ruleId === 'c1') {
-        expect(room?.types).toContain('computer-lab');
-      }
+      expect(lesson.roomId).toBe('r1');
     }
+    // Room r1 cannot cover 15 weekly slots while staying free of double booking,
+    // so the overflow is left as UNASSIGNED_HOURS instead of spilling to r2/r3.
+    const missing = (result.conflicts || [])
+      .filter((c: any) => c.type === 'UNASSIGNED_HOURS')
+      .reduce((s: number, c: any) => s + (c.missing ?? 1), 0);
+    expect(missing).toBe(5);
+    expect(result.schedule).toHaveLength(10);
   });
 
   it('respects per-group periodStart/periodEnd (shift scheduling)', async () => {
