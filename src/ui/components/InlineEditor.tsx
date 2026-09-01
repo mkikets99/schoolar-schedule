@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DragEvent } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, ProjectState, RearrangeBlockReason, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
-import { suggestRearrange } from '../../worker/rearrange';
+import { suggestRearrangeChoices } from '../../worker/rearrange';
 import { SearchableSelect } from './SearchableSelect';
 import { Modal } from './Modal';
 
@@ -15,6 +15,8 @@ interface InlineEditorProps {
   activeSemester: 'semester1' | 'semester2';
   onSave: (result: ScheduleResult, splits?: SemesterSplit[]) => void;
   editMode?: 'group' | 'teacher';
+  active?: boolean;
+  sessionKey?: number;
 }
 
 interface HistoryEntry {
@@ -24,7 +26,7 @@ interface HistoryEntry {
   splits: SemesterSplit[];
 }
 
-export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'group' }: InlineEditorProps) => {
+export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'group', active = true, sessionKey }: InlineEditorProps) => {
   const { t } = useTranslation();
   const [gridLessons, setGridLessons] = useState<Lesson[]>([]);
   const [poolLessons, setPoolLessons] = useState<Lesson[]>([]);
@@ -40,9 +42,17 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     period: number;
     suggestion: RearrangeSuggestion;
   } | null>(null);
-  const [blockedLesson, setBlockedLesson] = useState<{ name: string; day: string; period: number } | null>(null);
+  const [pendingChoices, setPendingChoices] = useState<{
+    lessonId: string;
+    day: string;
+    period: number;
+    choices: RearrangeSuggestion[];
+  } | null>(null);
+  const [blockedLesson, setBlockedLesson] = useState<{ name: string; day: string; period: number; reason?: RearrangeBlockReason } | null>(null);
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
+  const lastSourceRef = useRef<{ semester: 'semester1' | 'semester2'; session: number | undefined } | null>(null);
+  const pendingSourceRef = useRef<{ semester: 'semester1' | 'semester2'; session: number | undefined } | null>(null);
 
   const groups = project.groups || [];
   const teachers = project.teachers || [];
@@ -51,6 +61,19 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   const getSubject = (id: string) => subjects.find(s => s.id === id);
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getTeacherName = (id?: string) => teachers.find(t => t.id === id)?.shortName || teachers.find(t => t.id === id)?.name || '';
+
+  const blockReasonKey = (reason: RearrangeBlockReason): string => {
+    const keyMap: Record<RearrangeBlockReason, string> = {
+      GROUP_SLOT: 'rearrange_block_group_slot',
+      NO_FIRST_PERIOD: 'rearrange_block_no_first',
+      DAILY_OVERLOAD: 'rearrange_block_daily_overload',
+      DAILY_RULE: 'rearrange_block_daily_rule',
+      TEACHER_BUSY: 'rearrange_block_teacher_busy',
+      SPLIT_PARTNER: 'rearrange_block_split_partner',
+      NO_SPACE: 'rearrange_block_no_space',
+    };
+    return keyMap[reason];
+  };
 
   const ruleById = useMemo(() => new Map((project.curriculum || []).map(r => [r.id, r])), [project.curriculum]);
   const lessonTeacherId = (lesson: Lesson) => lesson.teacherId || ruleById.get(lesson.ruleId)?.teacherId;
@@ -154,9 +177,26 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   };
 
   useEffect(() => {
+    // The editor keeps its in-progress draft while hidden (view mode) so
+    // toggling view/edit never discards edits. The draft is reseeded only when
+    // its source changed while hidden (semester switch or a new generation
+    // session) or when the user switches semester / regenerates while editing.
+    const source = { semester: activeSemester, session: sessionKey };
+    if (!active) {
+      pendingSourceRef.current = source;
+      return;
+    }
+    const pending = pendingSourceRef.current;
+    const last = lastSourceRef.current;
+    if (pending && last && pending.semester === last.semester && pending.session === last.session) {
+      pendingSourceRef.current = null;
+      return;
+    }
     seed();
+    lastSourceRef.current = source;
+    pendingSourceRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSemester]);
+  }, [active, activeSemester, sessionKey]);
 
   const commit = (next: { grid: Lesson[]; pool: Lesson[]; poolSource: Record<string, 'semester1' | 'semester2'>; splits: SemesterSplit[] }) => {
     historyRef.current.push({ grid: gridLessons, pool: poolLessons, poolSource: { ...poolSource }, splits: workingSplits });
@@ -222,12 +262,29 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
       ? gridLessons
       : [...gridLessons, { ...poolLesson!, day, period }];
 
-    const suggestion = suggestRearrange(project, baseSchedule, id, { day, period });
-    if (!suggestion.feasible) {
-      const name = poolLesson
-        ? getGroupName(poolLesson.groupId)
-        : getGroupName(existing!.groupId);
-      setBlockedLesson({ name, day, period });
+    const choices = suggestRearrangeChoices(project, baseSchedule, id, { day, period });
+    const movedTeacherId = poolLesson ? lessonTeacherId(poolLesson) : lessonTeacherId(existing!);
+
+    // In teacher edit mode a solution must NOT reassign the lesson to another
+    // teacher - drops that would do so are treated as blocked.
+    const feasible = choices.filter(c => c.feasible &&
+      (editMode !== 'teacher' || !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId));
+
+    const suggestion = feasible[0] ?? choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' as const };
+
+    if (feasible.length === 0 || !suggestion.feasible) {
+      const name = editMode === 'teacher'
+        ? getTeacherName(selectedTeacherId) || getTeacherName(movedTeacherId) || ''
+        : poolLesson
+          ? getGroupName(poolLesson.groupId)
+          : getGroupName(existing!.groupId);
+      setBlockedLesson({ name, day, period, reason: suggestion.reason });
+      return;
+    }
+
+    // Multiple distinct AI solutions: let the user choose which to apply.
+    if (feasible.length > 1) {
+      setPendingChoices({ lessonId: id, day, period, choices: feasible });
       return;
     }
 
@@ -243,6 +300,12 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     if (!pendingSuggestion) return;
     commitFromMoves(pendingSuggestion.lessonId, pendingSuggestion.day, pendingSuggestion.period, pendingSuggestion.suggestion);
     setPendingSuggestion(null);
+  };
+
+  const confirmChoice = (suggestion: RearrangeSuggestion) => {
+    if (!pendingChoices) return;
+    commitFromMoves(pendingChoices.lessonId, pendingChoices.day, pendingChoices.period, suggestion);
+    setPendingChoices(null);
   };
 
   const unassignLesson = (id: string) => {
@@ -306,8 +369,8 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   );
 
   const counts = useMemo(
-    () => countLessons(visibleGrid, activePool, project),
-    [visibleGrid, activePool, project]
+    () => countLessons(visibleGrid, visiblePool, project),
+    [visibleGrid, visiblePool, project]
   );
 
   // Needed curriculum distribution: for every entered curriculum rule, how many
@@ -420,6 +483,62 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     }
     return lines.join('\n');
   };
+
+  const renderMoveSummary = (suggestion: RearrangeSuggestion): ReactNode => {
+    const first = suggestion.moves[0];
+    const moved = gridLessons.find(x => x.id === first?.lessonId)
+      ?? poolLessons.find(x => x.id === first?.lessonId);
+    const subj = moved ? getSubject(moved.subjectId) : undefined;
+    const gname = moved ? getGroupName(moved.groupId) : '';
+    const extraCount = Math.max(0, suggestion.moves.length - 1);
+    const teacherChanged = suggestion.teacherIdForMain;
+    const label = `${subj?.shortName || subj?.name || '?'} — ${gname} → ${first ? `${t(first.toDay.toLowerCase())}, ${t('period')} ${first.toPeriod}` : ''}`;
+    return (
+      <>
+        <span>
+          {label}
+          {teacherChanged && (
+            <span className="rearrange-swap">
+              {` ${t('rearrange_swap')}: ${moved ? getTeacherName(mainTeacherOf(moved)) : ''} → ${getTeacherName(teacherChanged)}`}
+            </span>
+          )}
+        </span>
+        {extraCount > 0 && <span className="choose-extra">{t('rearrange_choose_extra', { count: extraCount })}</span>}
+      </>
+    );
+  };
+
+  const renderMoveList = (suggestion: RearrangeSuggestion) => (
+    <div className="detail-list">
+      {suggestion.moves.map((m, i) => {
+        const l = gridLessons.find(x => x.id === m.lessonId)
+          ?? poolLessons.find(x => x.id === m.lessonId);
+        const subj = l ? getSubject(l.subjectId) : undefined;
+        const gname = l ? getGroupName(l.groupId) : '';
+        const teacherChanged = i === 0 && suggestion.teacherIdForMain;
+        const teacherName = teacherChanged
+          ? getTeacherName(suggestion.teacherIdForMain)
+          : l ? getTeacherName(mainTeacherOf(l)) : '';
+        return (
+          <div key={`${m.lessonId}-${i}`} className="detail-row">
+            <span className="detail-main">
+              {subj?.shortName || subj?.name || '?'} — {gname}
+              {teacherChanged ? (
+                <span className="rearrange-swap">
+                  {t('rearrange_swap')}: {l ? getTeacherName(mainTeacherOf(l)) : ''} → {getTeacherName(suggestion.teacherIdForMain)}
+                </span>
+              ) : teacherName ? (
+                <span> ({teacherName})</span>
+              ) : null}
+            </span>
+            <span className="detail-meta">
+              {t('period')} {l?.period ?? '-'} → {m.toPeriod} • {t(m.toDay.toLowerCase())}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   const renderLesson = (lesson: Lesson) => {
     const reasons = analysis.byLesson.get(lesson.id) || [];
@@ -589,35 +708,34 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
 
       <Modal isOpen={!!pendingSuggestion} onClose={() => setPendingSuggestion(null)} title={t('rearrange_confirm_title')}>
         <p className="editor-hint">{t('rearrange_confirm_desc')}</p>
-        {pendingSuggestion && (
-          <div className="detail-list">
-            {pendingSuggestion.suggestion.moves.map((m, i) => {
-              const l = gridLessons.find(x => x.id === m.lessonId)
-                ?? poolLessons.find(x => x.id === m.lessonId);
-              const subj = l ? getSubject(l.subjectId) : undefined;
-              const gname = l ? getGroupName(l.groupId) : '';
-              const teacherChanged = i === 0 && pendingSuggestion.suggestion.teacherIdForMain;
-              const teacherName = teacherChanged
-                ? getTeacherName(pendingSuggestion.suggestion.teacherIdForMain)
-                : l ? getTeacherName(mainTeacherOf(l)) : '';
-              return (
-                <div key={`${m.lessonId}-${i}`} className="detail-row">
-                  <span className="detail-main">
-                    {subj?.shortName || subj?.name || '?'} — {gname}
-                    {teacherName && <span> ({teacherName})</span>}
-                    {teacherChanged && <span className="rearrange-swap"> → {getTeacherName(pendingSuggestion.suggestion.teacherIdForMain)}</span>}
-                  </span>
-                  <span className="detail-meta">
-                    {t('period')} {l?.period ?? '-'} → {m.toPeriod} • {t(m.toDay.toLowerCase())}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {pendingSuggestion && renderMoveList(pendingSuggestion.suggestion)}
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
           <button onClick={() => setPendingSuggestion(null)} className="secondary-btn">{t('rearrange_confirm_cancel')}</button>
           <button onClick={confirmSuggestion} className="primary-btn">{t('rearrange_confirm_accept')}</button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!pendingChoices} onClose={() => setPendingChoices(null)} title={t('rearrange_choose_title')}>
+        <p className="editor-hint">{t('rearrange_choose_desc')}</p>
+        {pendingChoices && (
+          <div className="detail-list">
+            {pendingChoices.choices.map((choice, idx) => (
+              <div key={idx} className="detail-row choose-row" onClick={() => confirmChoice(choice)} role="button" tabIndex={0}>
+                <span className="detail-main">
+                  {renderMoveSummary(choice)}
+                </span>
+                <button
+                  className="primary-btn choose-apply"
+                  onClick={(e) => { e.stopPropagation(); confirmChoice(choice); }}
+                >
+                  {t('rearrange_choose_apply')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+          <button onClick={() => setPendingChoices(null)} className="secondary-btn">{t('rearrange_confirm_cancel')}</button>
         </div>
       </Modal>
 
@@ -625,6 +743,11 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
         <p className="editor-hint">
           {t('rearrange_blocked_desc', { group: blockedLesson?.name, day: blockedLesson ? t(blockedLesson.day.toLowerCase()) : '', period: blockedLesson?.period })}
         </p>
+        {blockedLesson?.reason && (
+          <p className="editor-hint rearrange-block-reason">
+            {t(blockReasonKey(blockedLesson.reason))}
+          </p>
+        )}
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
           <button onClick={() => setBlockedLesson(null)} className="primary-btn">{t('ok')}</button>
         </div>

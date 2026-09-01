@@ -12,7 +12,7 @@ import { CurriculumRule, ScheduleResult, SemesterSplit } from '../../shared/type
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-export const ScheduleViewer = () => {
+export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }) => {
   const { t } = useTranslation();
   const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
@@ -413,14 +413,24 @@ export const ScheduleViewer = () => {
 
       {!hasSchedule ? (
         <div className="no-selection">{t('generate_schedule_first')}</div>
-      ) : editMode !== 'view' && project ? (
-        <InlineEditor
-          project={project}
-          activeSemester={activeSemester}
-          onSave={handleEditorSave}
-          editMode={editMode}
-        />
       ) : (
+        <>
+          {project && (
+            <div
+              style={{ display: editMode === 'view' ? 'none' : undefined }}
+              aria-hidden={editMode === 'view'}
+            >
+              <InlineEditor
+                project={project}
+                activeSemester={activeSemester}
+                active={editMode !== 'view'}
+                sessionKey={editorSession}
+                onSave={handleEditorSave}
+                editMode={editMode === 'view' ? 'group' : editMode}
+              />
+            </div>
+          )}
+          {editMode === 'view' && (
         <div className="schedule-grid-container">
           <table className="schedule-grid full-schedule" id="schedule-table">
             <thead>
@@ -486,7 +496,9 @@ export const ScheduleViewer = () => {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+          )}
+        </>
       )}
 
       <ExportModal isOpen={exportOpen} onClose={() => setExportOpen(false)} context={exportContext} />

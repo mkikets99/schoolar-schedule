@@ -164,15 +164,33 @@ export interface RearrangeMove {
 }
 
 /**
+ * Why an edit-mode move was rejected. Mirrors the hard constraints that no
+ * combination of relocations or a substitute teacher can satisfy. When
+ * `feasible` is false and no reason is set, the engine gave up after trying
+ * every resolution (usually a blocker lesson that could not be relocated).
+ */
+export type RearrangeBlockReason =
+  | 'GROUP_SLOT' // the group already has a lesson in the target slot
+  | 'NO_FIRST_PERIOD' // the subject cannot be the first lesson of the day
+  | 'DAILY_OVERLOAD' // the group already has its max lessons for that day
+  | 'DAILY_RULE' // the rule already has its max lessons for that day
+  | 'TEACHER_BUSY' // the teacher is unavailable at that slot
+  | 'SPLIT_PARTNER' // a colliding lesson is a split/double partner and can't move
+  | 'NO_SPACE'; // no relocation or substitute could open the slot
+
+/**
  * Outcome of an edit-mode lesson move request. `feasible` false means the target
  * slot cannot be reached without violating constraints; `moves` lists the extra
  * relocations the user must accept alongside the primary move, and
  * `teacherIdForMain` (when set) reassigns the moved lesson to another teacher.
+ * `reason` explains the rejection so the UI can tell the user which fixed rule
+ * is being broken.
  */
 export interface RearrangeSuggestion {
   feasible: boolean;
   moves: RearrangeMove[];
   teacherIdForMain?: string;
+  reason?: RearrangeBlockReason;
 }
 
 export interface ProjectState {

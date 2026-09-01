@@ -114,6 +114,13 @@ header h1 {
   color: #7c83ff;
   font-size: 0.8rem;
   font-style: italic;
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(124, 131, 255, 0.45);
+  border-radius: 4px;
+  background: rgba(124, 131, 255, 0.10);
+  white-space: nowrap;
 }
 
 .worker-version:hover {
@@ -850,6 +857,28 @@ tr.unassigned {
   color: #e0b84a;
 }
 
+.choose-row {
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.choose-row:hover {
+  border-color: #7c83ff;
+  background-color: #1e1f2e;
+}
+
+.choose-apply {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.choose-extra {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: #999;
+}
+
 .detail-sub {
   flex-basis: 100%;
   font-size: 0.78rem;
@@ -1524,6 +1553,12 @@ tr.split-group + tr.split-group td {
   color: #666;
   font-style: italic;
   margin: 0;
+}
+
+.rearrange-block-reason {
+  margin-top: 0.5rem;
+  color: #e0b84a;
+  font-style: normal;
 }
 
 .inline-editor-body {

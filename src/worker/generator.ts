@@ -1,4 +1,5 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove } from '../shared/types';
+import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -70,6 +71,109 @@ function countUnassigned(result: ScheduleResult): number {
   return (result.conflicts || [])
     .filter((c) => c?.type === 'UNASSIGNED_HOURS')
     .reduce((sum, c) => sum + (c.missing ?? 1), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Post-placement auto-resolve: reuse the rearrange engine at generation time to
+// recover lessons the greedy pass left unassigned. A lesson whose every direct
+// slot failed is retried through resolveUnplacedPlacement, which may relocate a
+// same-teacher or same-room occupant of a target slot while keeping every
+// placed lesson constraint-valid. Runs only when a schedule has UNASSIGNED_HOURS.
+// ---------------------------------------------------------------------------
+
+function applyMoveList(schedule: any[], moves: RearrangeMove[]): void {
+  for (const move of moves) {
+    const lesson = schedule.find((l: any) => l.id === move.lessonId);
+    if (!lesson) continue;
+    lesson.day = move.toDay;
+    lesson.period = move.toPeriod;
+    if (move.teacherId) lesson.teacherId = move.teacherId;
+  }
+}
+
+function tryPlaceUnassignedOne(
+  ctx: RearrangeContext,
+  schedule: any[],
+  rule: CurriculumRule,
+  start: number,
+  end: number
+): boolean {
+  for (const day of DAYS) {
+    for (let period = start; period <= end; period++) {
+      const suggestion = resolveUnplacedPlacement(
+        ctx,
+        schedule,
+        {
+          id: crypto.randomUUID(),
+          ruleId: rule.id,
+          groupId: rule.groupId,
+          subjectId: rule.subjectId,
+          teacherId: rule.teacherId,
+          roomId: rule.roomId,
+          day: 'Monday',
+          period: 1,
+        },
+        { day, period }
+      );
+      if (!suggestion.feasible || suggestion.moves.length === 0) continue;
+      const main = suggestion.moves[0];
+      applyMoveList(schedule, suggestion.moves);
+      schedule.push({
+        id: main.lessonId,
+        ruleId: rule.id,
+        groupId: rule.groupId,
+        subjectId: rule.subjectId,
+        teacherId: rule.teacherId,
+        roomId: rule.roomId,
+        day: main.toDay,
+        period: main.toPeriod,
+      });
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Post-pass for one generated semester: try to turn every UNASSIGNED_HOURS
+ * conflict into a placed lesson by relocating colliding lessons. The conflict
+ * list is rewritten in place, `missing` reduced by one per recovered lesson.
+ * A no-op when there is nothing to resolve.
+ */
+export function autoResolveUnassigned(project: ProjectState, schedule: any[], conflicts: any[]): void {
+  if (!(conflicts || []).some((c) => c?.type === 'UNASSIGNED_HOURS')) return;
+
+  const ctx = createRearrangeContext(project);
+  const ruleById = new Map(project.curriculum.map((r) => [r.id, r]));
+  const windows = new Map<string, { start: number; end: number }>();
+  for (const g of project.groups || []) {
+    const cfg = computeGroupScheduleConfig(g);
+    windows.set(g.id, { start: cfg.periodStart, end: cfg.periodEnd });
+  }
+
+  const kept: any[] = [];
+  for (const conflict of conflicts) {
+    if (conflict?.type !== 'UNASSIGNED_HOURS' || !conflict.ruleId) {
+      kept.push(conflict);
+      continue;
+    }
+    const rule = ruleById.get(conflict.ruleId);
+    if (!rule) {
+      kept.push(conflict);
+      continue;
+    }
+    const window = windows.get(rule.groupId) || { start: 1, end: 8 };
+    let missing = conflict.missing ?? 1;
+    let guard = 0;
+    while (missing > 0 && guard < 25) {
+      guard++;
+      if (!tryPlaceUnassignedOne(ctx, schedule, rule, window.start, window.end)) break;
+      missing--;
+    }
+    if (missing > 0) kept.push({ ...conflict, missing });
+  }
+  conflicts.length = 0;
+  conflicts.push(...kept);
 }
 
 // ---------------------------------------------------------------------------
@@ -731,6 +835,8 @@ async function runGenerate(
       emit({ type: 'PROGRESS', payload: { progress } });
     }
   }
+
+  autoResolveUnassigned(project, schedule, conflicts);
 
   optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, rng, optimizePasses);
 

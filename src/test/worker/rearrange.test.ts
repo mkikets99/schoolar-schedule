@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestRearrange } from '../../worker/rearrange';
+import { suggestRearrange, suggestRearrangeChoices } from '../../worker/rearrange';
 import { Lesson, ProjectState } from '../../shared/types';
 
 const makeLesson = (id: string, over: Partial<Lesson> = {}): Lesson => ({
@@ -174,12 +174,81 @@ describe('suggestRearrange', () => {
     const s = suggestRearrange(
       makeProject({
         constraints: [{ id: 'x', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 2 }],
+        groups: [
+          { id: 'g1', name: '5-A', grade: 5, subgroups: [], periodStart: 4, periodEnd: 8 },
+          { id: 'g2', name: '5-B', grade: 5, subgroups: [], periodStart: 1, periodEnd: 8 },
+        ],
       }),
       schedule,
       'l1',
       { day: 'Monday', period: 5 }
     );
-    // Monday already has l2 and l3 for rule c1 (2 lessons); adding l1 there tops 2.
+    // Monday already has l2 and l3 for rule c1 (2 lessons) and no other day is in
+    // scope for the group (periodStart 4), so no lesson can be relocated and the
+    // move stays hard-infeasible - reported with the daily-rule reason.
     expect(s.feasible).toBe(false);
+    expect(s.reason).toBe('DAILY_RULE');
+  });
+
+  it('resolves a daily-rule-cap block by relocating a same-rule lesson off the day', () => {
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { period: 3 }),
+      makeLesson('l3', { period: 5 }),
+    ];
+    const s = suggestRearrange(
+      makeProject({
+        constraints: [{ id: 'x', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 2 }],
+      }),
+      schedule,
+      'l1',
+      { day: 'Monday', period: 6 }
+    );
+    // Monday already has l2 and l3 for rule c1 (the cap); the engine relocates
+    // one of them to another day so l1 can fit - AI rearrange runs instead of a
+    // flat rejection. The periods are non-adjacent so the double-lesson guard
+    // does not treat them as an unbreakable pair.
+    expect(s.feasible).toBe(true);
+    expect(s.moves.length).toBe(2);
+    expect(s.moves[0].lessonId).toBe('l1');
+    expect(s.moves[0].toPeriod).toBe(6);
+    const displaced = s.moves[1];
+    expect(displaced.lessonId).toBe('l2');
+    expect(displaced.toDay).not.toBe('Monday');
+    expect(displaced.toDay + displaced.toPeriod).not.toBe('Monday3');
+  });
+
+  it('returns multiple distinct choices when several resolutions exist', () => {
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { period: 3 }),
+      makeLesson('l3', { period: 5 }),
+    ];
+    const choices = suggestRearrangeChoices(
+      makeProject({
+        constraints: [{ id: 'x', kind: 'MAX_DAILY_LESSONS', ruleId: 'c1', maxPerDay: 2 }],
+      }),
+      schedule,
+      'l1',
+      { day: 'Monday', period: 6 }
+    );
+    const feasible = choices.filter(c => c.feasible);
+    // Direct move is impossible (cap), but both l2 and l3 are valid victims so
+    // the engine offers a choice per victim plus (in teacher mode) alternatives.
+    expect(feasible.length).toBeGreaterThan(1);
+    const displacedIds = new Set(feasible.flatMap(c => c.moves.slice(1).map(m => m.lessonId)));
+    expect(displacedIds.has('l2')).toBe(true);
+    expect(displacedIds.has('l3')).toBe(true);
+  });
+
+  it('reports GROUP_SLOT reason when the group already occupies the slot', () => {
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { period: 1, id: 'l2', subjectId: 'bio', groupId: 'g1', ruleId: 'c2', roomId: 'r2', teacherId: 't2' }),
+    ];
+    const s = suggestRearrange(makeProject(), schedule, 'l1', { day: 'Monday', period: 1 });
+    // The group already has a different-subject lesson in the same slot.
+    expect(s.feasible).toBe(false);
+    expect(s.reason).toBe('GROUP_SLOT');
   });
 });

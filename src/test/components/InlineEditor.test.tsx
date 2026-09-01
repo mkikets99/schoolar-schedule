@@ -295,6 +295,140 @@ describe('InlineEditor teacher edit mode', () => {
     expect(rows.length).toBe(1);
     expect(rows[0].querySelector('.detail-meta')!.textContent).toContain('2');
   });
+
+  it('shows only the selected teacher unassigned count, not the whole project', () => {
+    const project: ProjectState = {
+      version: '1.0.0',
+      school: { id: 's1', name: 'Test School' },
+      academicYears: [],
+      teachers: [
+        { id: 't1', name: 'Anna', subjects: ['subj1'] },
+        { id: 't2', name: 'Bohdan', subjects: ['subj1'] },
+      ],
+      subjects: [{ id: 'subj1', name: 'Math', shortName: 'M' }],
+      rooms: [{ id: 'r1', name: 'Room 1', types: [] }],
+      groups: [
+        { id: 'g1', name: '5-A', grade: 5, subgroups: [] },
+        { id: 'g2', name: '5-B', grade: 5, subgroups: [] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2', roomId: 'r1' },
+      ],
+      loadDistribution: [],
+      constraints: [],
+      generatedSchedule: {
+        schedule: [
+          { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+          { id: 'l2', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 2 },
+          { id: 'l3', ruleId: 'c2', groupId: 'g2', subjectId: 'subj1', teacherId: 't2', roomId: 'r1', day: 'Monday', period: 3 },
+        ],
+        conflicts: [{ type: 'UNASSIGNED_HOURS', ruleId: 'c2', missing: 1 }],
+        score: 0.75,
+      },
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+    );
+    expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Anna (0)');
+    expect(container.querySelector('.checker-empty')).toBeTruthy();
+  });
+
+  it('blocks a pool placement that would swap the lesson to another teacher', () => {
+    const project: ProjectState = {
+      version: '1.0.0',
+      school: { id: 's1', name: 'Test School' },
+      academicYears: [],
+      teachers: [
+        { id: 't1', name: 'Anna', subjects: ['subj1'] },
+        { id: 't2', name: 'Bohdan', subjects: ['subj1'] },
+      ],
+      subjects: [{ id: 'subj1', name: 'Math', shortName: 'M' }],
+      rooms: [{ id: 'r1', name: 'Room 1', types: [] }],
+      groups: [
+        { id: 'g1', name: '5-A', grade: 5, subgroups: [] },
+        { id: 'g2', name: '5-B', grade: 5, subgroups: [] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't2', roomId: 'r1' },
+      ],
+      loadDistribution: [],
+      constraints: [{ id: 'x1', kind: 'TEACHER_BUSY', teacherId: 't1', day: 'Monday', periods: [1] }],
+      generatedSchedule: {
+        schedule: [
+          { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 2 },
+          { id: 'l2', ruleId: 'c2', groupId: 'g2', subjectId: 'subj1', teacherId: 't2', roomId: 'r1', day: 'Monday', period: 1 },
+        ],
+        conflicts: [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 }],
+        score: 0.5,
+      },
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+    );
+    const chip = container.querySelector('.checker-chip')!;
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+      clientX: 130,
+      dataTransfer: { getData: vi.fn(() => '') },
+    });
+    expect(screen.getByText('rearrange_blocked_title')).toBeTruthy();
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+  });
+});
+
+describe('InlineEditor draft lifecycle (view/edit toggle)', () => {
+  it('keeps in-progress edits while hidden and when restored', () => {
+    const project = makeProject();
+    const { container, rerender } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    fireEvent.dragStart(lesson, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelector('.checker-zone')!, { dataTransfer: { getData: vi.fn(() => '') } });
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+
+    rerender(<InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active={false} />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+
+    rerender(<InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+  });
+
+  it('reseesds from the project when the generation session changes', () => {
+    const project = makeProject();
+    const { container, rerender } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active sessionKey={0} />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    fireEvent.dragStart(lesson, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelector('.checker-zone')!, { dataTransfer: { getData: vi.fn(() => '') } });
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+
+    rerender(<InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active sessionKey={1} />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+  });
+
+  it('reseesds a fresh schedule when the semester changes while hidden', () => {
+    const project = makeProject();
+    const { container, rerender } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    fireEvent.dragStart(lesson, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelector('.checker-zone')!, { dataTransfer: { getData: vi.fn(() => '') } });
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+
+    rerender(<InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} active={false} />);
+    rerender(<InlineEditor project={project} activeSemester="semester2" onSave={vi.fn()} active={false} />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(0);
+
+    rerender(<InlineEditor project={project} activeSemester="semester2" onSave={vi.fn()} active />);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+  });
 });
 
 describe('InlineEditor two-semester shared pool', () => {

@@ -25,6 +25,7 @@ function AppContent() {
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [editorSession, setEditorSession] = useState(0);
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
@@ -56,6 +57,7 @@ function AppContent() {
         setProgress(null);
         updateGeneratedSchedules(payload?.schedules);
         updateGeneratedSplits(payload?.splits);
+        setEditorSession(s => s + 1);
       }
     };
 
@@ -129,6 +131,7 @@ function AppContent() {
   const handleClearSchedule = () => {
     if (confirm(t('confirm_clear_schedule'))) {
       clearGeneratedSchedule();
+      setEditorSession(s => s + 1);
       setWorkerStatus(t('worker_ready'));
       setGenerating(false);
       setProgress(null);
@@ -269,7 +272,7 @@ function AppContent() {
                         <button onClick={handleGenerateClick} className="generate-btn-small" title={t('generate_btn_hint')}>{hasAnySchedule(project) ? t('regenerate') : t('generate')}</button>
                       </div>
                     </div>
-                  <ScheduleViewer />
+                  <ScheduleViewer editorSession={editorSession} />
                 </section>
               )}
             </div>
