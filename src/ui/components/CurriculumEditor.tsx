@@ -69,7 +69,9 @@ export const CurriculumEditor = () => {
         id: crypto.randomUUID(),
         groupId: newItem.groupId,
         subjectId: newItem.subjectId,
-        hoursPerWeek: Math.ceil(newItem.hours / splitCount),
+        // Each subgroup is a separate parallel class, so it needs the SAME
+        // weekly hours as the original - the hours are not divided up.
+        hoursPerWeek: newItem.hours,
         teacherId: sg.teacherId || undefined,
         roomId: sg.roomId || undefined,
       }));

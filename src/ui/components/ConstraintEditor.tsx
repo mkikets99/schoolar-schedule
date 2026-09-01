@@ -24,6 +24,7 @@ export const ConstraintEditor = () => {
   const teachers = project?.teachers || [];
   const subjects = project?.subjects || [];
   const groups = project?.groups || [];
+  const rooms = project?.rooms || [];
   const loadTeacherIds = [...new Set((project?.loadDistribution || []).map(l => l.teacherId))];
 
   const [busyOpen, setBusyOpen] = useState(false);
@@ -50,10 +51,16 @@ export const ConstraintEditor = () => {
   const teacherName = (id?: string) => (id ? teachers.find(x => x.id === id)?.name || id : '');
   const subjectName = (id?: string) => (id ? subjects.find(x => x.id === id)?.name || id : '');
   const groupName = (id?: string) => (id ? groups.find(x => x.id === id)?.name || '' : '');
+  const roomName = (id?: string) => (id ? rooms.find(x => x.id === id)?.name || id : '');
   const ruleLabel = (ruleId?: string) => {
     const rule = (project?.curriculum || []).find(r => r.id === ruleId);
     if (!rule) return ruleId || '';
-    return `${subjectName(rule.subjectId)} · ${groupName(rule.groupId)}`;
+    // Split rules share the same group + subject, distinguished only by their
+    // per-subgroup teacher/room; append them so the label - and any selector -
+    // never shows duplicate entries.
+    const teacher = rule.teacherId ? ` · ${teacherName(rule.teacherId)}` : '';
+    const room = rule.roomId ? ` · @${roomName(rule.roomId)}` : '';
+    return `${subjectName(rule.subjectId)} · ${groupName(rule.groupId)}${teacher}${room}`;
   };
 
   const dayLabel = (day: string) => (day === '*' ? t('every_day') : t(day.toLowerCase()));
@@ -481,7 +488,7 @@ export const ConstraintEditor = () => {
           <MultiSelect
             value={forbidRuleIds}
             onChange={setForbidRuleIds}
-            options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
+            options={(project?.curriculum || []).map(r => ({ value: r.id, label: ruleLabel(r.id) }))}
             placeholder={t('select_rule')}
           />
         </FormField>
@@ -517,7 +524,7 @@ export const ConstraintEditor = () => {
           <MultiSelect
             value={maxDailyRuleIds}
             onChange={setMaxDailyRuleIds}
-            options={(project?.curriculum || []).map(r => ({ value: r.id, label: `${subjectName(r.subjectId)} · ${groupName(r.groupId)}` }))}
+            options={(project?.curriculum || []).map(r => ({ value: r.id, label: ruleLabel(r.id) }))}
             placeholder={t('select_rule')}
           />
         </FormField>
