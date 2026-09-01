@@ -179,17 +179,22 @@ function intendedLoads(
   return { teacher, group };
 }
 
-// Higher is better. Placement completeness dominates (a schedule must place the
-// lessons). Free-hour compactness is the next big objective: every free hour of a
-// teacher subtracts GAP_HOUR_PENALTY, and any teacher with more than
-// BAD_TEACHER_GAP_HOURS weekly free hours adds a heavy BAD_TEACHER_PENALTY unless
-// it is a forced solution (no placement-complete alternative exists). Load
-// distribution quality only breaks ties between equally complete, equally compact
-// schedules. Pinned FORBID_LESSON rules that still miss hours are penalized hard
-// so the chosen attempt prioritizes the pinned load.
-function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState, pinnedRuleIds?: Set<string>): number {
+// Higher is better. The winner is the schedule that resolves the most lessons
+// raw count of placed lessons; percentage is never used for selection. Free-hour
+// compactness is the next big objective: every free hour of a teacher subtracts
+// GAP_HOUR_PENALTY, and any teacher with more than BAD_TEACHER_GAP_HOURS weekly
+// free hours adds a heavy BAD_TEACHER_PENALTY unless it is a forced solution (no
+// placement-complete alternative exists). Load distribution quality only breaks
+// ties between equally complete, equally compact schedules. Pinned FORBID_LESSON
+// rules that still miss hours are penalized hard so the chosen attempt
+// prioritizes the pinned load.
+export function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState, pinnedRuleIds?: Set<string>): number {
   const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
-  const placed = (schedules.semester1.score + schedules.semester2.score) / 2;
+  // The winner is chosen by the raw amount of unresolved lessons (the complement
+  // of the placed lesson count), never by a placement percentage: a schedule that
+  // resolves 190 of 200 lessons beats one that resolves 95 of 100 even though
+  // both are 95%. The per-semester `score` ratio is still reported for display.
+  const resolved = schedules.semester1.schedule.length + schedules.semester2.schedule.length;
   const pinnedUnassigned = (schedules.semester1.conflicts || [])
     .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
     .reduce((sum, c) => sum + (c.missing ?? 1), 0)
@@ -248,7 +253,7 @@ function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], pro
     deviation += Math.abs(g.s1 - a.s1) + Math.abs(g.s2 - a.s2);
   }
 
-  return placed * 1000
+  return resolved * 1000
     - unassigned
     - pinnedUnassigned * 500
     - gap.totalGapHours * GAP_HOUR_PENALTY

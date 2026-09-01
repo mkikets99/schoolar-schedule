@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ProjectState, CurriculumRule } from '../../shared/types';
-import { generateSemesterSchedules } from '../../worker/generator';
+import { ProjectState, CurriculumRule, SemesterSchedules, ScheduleResult } from '../../shared/types';
+import { generateSemesterSchedules, scoreAttempt } from '../../worker/generator';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -176,5 +176,55 @@ describe('Worker v0.2 gap optimization', () => {
     expect(t1Gap).toBeGreaterThan(5);
     const report: GapReport = payload.gapReport.semester1;
     expect(report.badTeachers).toContain('t1');
+  });
+
+  it('ranks the best attempt by amount of unresolved lessons, not by percentage', () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    const lesson = (period: number, day: string, ruleId: string) => ({
+      id: `${ruleId}-${day}-${period}`,
+      ruleId,
+      groupId: 'g1',
+      subjectId: 'subj-math',
+      teacherId: 't1',
+      day,
+      period,
+    });
+    const sem = (count: number, score: number, unassigned: number): ScheduleResult => ({
+      schedule: Array.from({ length: count }, (_, i) => lesson(1 + Math.floor(i / 5), DAYS[i % 5], 'c1')),
+      conflicts: unassigned > 0 ? [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: unassigned }] : [],
+      score,
+    });
+
+    // High percentage (1.0) but 2 lessons still missing.
+    const highPercentageButGappy: SemesterSchedules = { semester1: sem(9, 1.0, 1), semester2: sem(9, 1.0, 1) };
+    // Lower percentage (0.9) but everything is resolved (20/20) - must win.
+    const fewerUnresolved: SemesterSchedules = { semester1: sem(10, 0.9, 0), semester2: sem(10, 0.9, 0) };
+
+    expect(scoreAttempt(fewerUnresolved, [], project)).toBeGreaterThan(scoreAttempt(highPercentageButGappy, [], project));
+  });
+
+  it('still prefers the tighter schedule when unresolved counts are equal', () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+    const build = (loose: boolean): SemesterSchedules => {
+      const periods = loose
+        ? [{ day: 'Monday', period: 1 }, { day: 'Monday', period: 5 }, { day: 'Tuesday', period: 1 }, { day: 'Wednesday', period: 1 }, { day: 'Thursday', period: 1 }]
+        : [{ day: 'Monday', period: 1 }, { day: 'Tuesday', period: 1 }, { day: 'Wednesday', period: 1 }, { day: 'Thursday', period: 1 }, { day: 'Friday', period: 1 }];
+      const schedule = periods.map((p, i) => ({
+        id: `l${i}`, ruleId: 'c1', groupId: 'g1', subjectId: 'subj-math', teacherId: 't1', day: p.day, period: p.period,
+      }));
+      return { semester1: { schedule, conflicts: [], score: 1 }, semester2: { schedule, conflicts: [], score: 1 } };
+    };
+
+    // Both resolve 5 lessons with 0 unassigned. The gap-free version must outrank
+    // the one where a Monday lesson sits at period 5 (3 free hours that day).
+    const tight = build(false);
+    const loose = build(true);
+    expect(teacherWeekFreePeriods(tight.semester1.schedule, 't1')).toBe(0);
+    expect(teacherWeekFreePeriods(loose.semester1.schedule, 't1')).toBe(3);
+    expect(scoreAttempt(tight, [], project)).toBeGreaterThan(scoreAttempt(loose, [], project));
   });
 });
