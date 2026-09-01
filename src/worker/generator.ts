@@ -1090,10 +1090,18 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     if (!best || quality > best.quality) {
       best = { ...candidate, quality };
     }
-    emit({ type: 'PROGRESS', payload: { progress: Math.floor(((attempt + 1) / attempts) * 95) } });
+    emit({
+      type: 'PROGRESS',
+      payload: {
+        progress: Math.floor(((attempt + 1) / attempts) * 95),
+        attempt: attempt + 1,
+        attempts,
+        bestQuality: Math.round(best!.quality),
+      },
+    });
   }
 
-  emit({ type: 'PROGRESS', payload: { progress: 100 } });
+  emit({ type: 'PROGRESS', payload: { progress: 100, attempt: attempts, attempts, bestQuality: Math.round(best!.quality) } });
 
   emit({
     type: 'RESULT',

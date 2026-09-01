@@ -14,11 +14,13 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
   const { t } = useTranslation();
   const [attempts, setAttempts] = useState(settings.attempts);
   const [maxSpillPasses, setMaxSpillPasses] = useState(settings.maxSpillPasses);
+  const [optimizePasses, setOptimizePasses] = useState(settings.optimizePasses ?? 8);
 
   useEffect(() => {
     if (open) {
       setAttempts(settings.attempts);
       setMaxSpillPasses(settings.maxSpillPasses);
+      setOptimizePasses(settings.optimizePasses ?? 8);
     }
   }, [open, settings]);
 
@@ -26,6 +28,7 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
     onGenerate({
       attempts: Math.max(1, Math.min(200, Math.floor(attempts || 1))),
       maxSpillPasses: Math.max(0, Math.min(20, Math.floor(maxSpillPasses || 0))),
+      optimizePasses: Math.max(0, Math.min(60, Math.floor(optimizePasses || 0))),
     });
   };
 
@@ -62,6 +65,16 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
         />
       </FormField>
       <p className="form-hint">{t('generate_max_spill_passes_hint')}</p>
+      <FormField label={t('generate_optimize_passes')}>
+        <input
+          type="number"
+          min={0}
+          max={60}
+          value={optimizePasses}
+          onChange={(e) => setOptimizePasses(Number(e.target.value))}
+        />
+      </FormField>
+      <p className="form-hint">{t('generate_optimize_passes_hint')}</p>
     </Modal>
   );
 };

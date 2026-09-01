@@ -23,6 +23,8 @@ function AppContent() {
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
   const [workerVersion, setWorkerVersion] = useState<string>('');
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
+  const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
@@ -37,10 +39,21 @@ function AppContent() {
         setWorkerVersion(payload?.version ?? '');
         setWorkerBuildVersion(payload?.buildVersion ?? '');
       } else if (type === 'PROGRESS') {
-        setWorkerStatus(`${t('generating')} ${payload.progress}%`);
+        setGenerating(true);
+        const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
+        setProgress(pct);
+        if (payload?.attempt && payload?.attempts) {
+          setWorkerStatus(
+            `${t('generating')} ${payload.attempt}/${payload.attempts} — ${pct}%`
+          );
+        } else {
+          setWorkerStatus(`${t('generating')} ${pct}%`);
+        }
       } else if (type === 'RESULT') {
         const attempts = payload?.attempts;
         setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
+        setGenerating(false);
+        setProgress(null);
         updateGeneratedSchedules(payload?.schedules);
         updateGeneratedSplits(payload?.splits);
       }
@@ -79,6 +92,8 @@ function AppContent() {
     if (workerRef.current && project) {
       clearGeneratedSchedule();
       setWorkerStatus(t('starting_gen'));
+      setGenerating(true);
+      setProgress(0);
       setTimeout(() => {
         if (workerRef.current) {
           workerRef.current.postMessage({
@@ -115,6 +130,8 @@ function AppContent() {
     if (confirm(t('confirm_clear_schedule'))) {
       clearGeneratedSchedule();
       setWorkerStatus(t('worker_ready'));
+      setGenerating(false);
+      setProgress(null);
     }
   };
 
@@ -159,6 +176,11 @@ function AppContent() {
           </select>
           <div className="status-bar">
             <span>{workerStatus}</span>
+            {generating && progress !== null && (
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${progress}%` }} />
+              </div>
+            )}
             {workerVersion && (
               <span className="worker-version" title={workerBuildVersion}>
                 v{workerVersion}

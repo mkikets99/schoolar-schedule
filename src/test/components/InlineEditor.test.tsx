@@ -107,17 +107,85 @@ describe('InlineEditor', () => {
   });
 
   it('moves a pool lesson onto the grid when dragged', () => {
+    // Leave Monday/period 1 free: jsdom drop events carry no clientX, so the
+    // target slot always resolves to period 1 of the first day row.
+    const project: ProjectState = {
+      ...makeProject(),
+      generatedSchedule: {
+        schedule: [
+          { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 2 },
+        ],
+        conflicts: [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 }],
+        score: 0.5,
+      },
+    };
+    const { container } = render(<InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} />);
+    const chip = container.querySelector('.checker-chip')!;
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
+    fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(0);
+  });
+
+  it('shows a blocked notice when a pool lesson is dropped onto an occupied slot', () => {
     const { container } = render(<InlineEditor project={makeProject()} activeSemester="semester1" onSave={vi.fn()} />);
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
     const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
-    vi.spyOn(dayTrack, 'getBoundingClientRect').mockReturnValue({
-      left: 0, top: 0, width: 480, height: 50, right: 480, bottom: 50, x: 0, y: 0,
-      toJSON: () => ({}),
-    });
     fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    expect(screen.getByText('rearrange_blocked_title')).toBeTruthy();
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+  });
+
+  it('proposes moving a blocking lesson and applies the change on confirm', () => {
+    // g1 is placed at Monday/2; another class occupies Monday/1 (the jsdom drop
+    // target). Placing the missing g1 lesson there must relocate the blocker.
+    const project: ProjectState = {
+      ...makeProject(),
+      groups: [
+        { id: 'g1', name: '5-A', grade: 5, subgroups: [] },
+        { id: 'g2', name: '5-B', grade: 5, subgroups: [] },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+      ],
+      generatedSchedule: {
+        schedule: [
+          { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 2 },
+          { id: 'l2', ruleId: 'c2', groupId: 'g2', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+        ],
+        conflicts: [
+          { type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 },
+          { type: 'UNASSIGNED_HOURS', ruleId: 'c2', missing: 1 },
+        ],
+        score: 0.5,
+      },
+    };
+    const onSave = vi.fn();
+    const { container } = render(<InlineEditor project={project} activeSemester="semester1" onSave={onSave} />);
+    const chip = container.querySelector('.checker-chip')!;
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+      clientX: 130,
+      dataTransfer: { getData: vi.fn(() => '') },
+    });
+    expect(screen.getByText('rearrange_confirm_title')).toBeTruthy();
+    fireEvent.click(screen.getByText('rearrange_confirm_accept'));
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
-    expect(container.querySelectorAll('.checker-chip').length).toBe(0);
+    fireEvent.click(screen.getByText('editor_apply'));
+    const grid = (onSave.mock.calls[0][0] as any).schedule;
+    expect(grid.length).toBe(3);
+    const main = grid.find((l: any) => l.id === 'pending-c1-0');
+    expect(main).toBeDefined();
+    expect(main.day).toBe('Monday');
+    expect(main.period).toBe(1);
+    const blocker = grid.find((l: any) => l.id === 'l2');
+    expect(blocker).toBeDefined();
+    expect(blocker.period).not.toBe(1);
+    expect(grid.find((l: any) => l.id === 'l1').period).toBe(2);
   });
 
   it('unassigns a grid lesson when dropped into the checker zone', () => {
@@ -240,7 +308,7 @@ describe('InlineEditor two-semester shared pool', () => {
       generatedSchedules: {
         semester1: {
           schedule: [
-            { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+            { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 1 },
             { id: 'l2', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 2 },
           ],
           conflicts: [],
@@ -248,7 +316,7 @@ describe('InlineEditor two-semester shared pool', () => {
         },
         semester2: {
           schedule: [
-            { id: 'l3', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 1 },
+            { id: 'l3', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Tuesday', period: 2 },
           ],
           conflicts: [],
           score: 1,

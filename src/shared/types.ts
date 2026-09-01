@@ -143,6 +143,38 @@ export interface GenerateSettings {
   optimizePasses?: number;
 }
 
+/** Per-attempt generation progress report sent from the worker. */
+export interface ProgressPayload {
+  /** Overall completion in the 0-100 range. */
+  progress: number;
+  /** The attempt ordinal (1-based) this report belongs to. */
+  attempt?: number;
+  /** Total number of attempts being run. */
+  attempts?: number;
+  /** Best candidate quality achieved so far. */
+  bestQuality?: number;
+}
+
+/** A single additional lesson relocation suggested by the rearrangement engine. */
+export interface RearrangeMove {
+  lessonId: string;
+  toDay: string;
+  toPeriod: number;
+  teacherId?: string;
+}
+
+/**
+ * Outcome of an edit-mode lesson move request. `feasible` false means the target
+ * slot cannot be reached without violating constraints; `moves` lists the extra
+ * relocations the user must accept alongside the primary move, and
+ * `teacherIdForMain` (when set) reassigns the moved lesson to another teacher.
+ */
+export interface RearrangeSuggestion {
+  feasible: boolean;
+  moves: RearrangeMove[];
+  teacherIdForMain?: string;
+}
+
 export interface ProjectState {
   version: string;
   school: School;
@@ -211,6 +243,8 @@ export type WorkerMessageType =
   | 'READY' 
   | 'GENERATE_SCHEDULE' 
   | 'PROGRESS' 
+  | 'REARRANGE' 
+  | 'REARRANGE_RESULT' 
   | 'RESULT' 
   | 'ERROR' 
   | 'UPDATE_CONSTRAINTS' 

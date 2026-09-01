@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CurriculumRule, Lesson, ProjectState, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
+import { suggestRearrange } from '../../worker/rearrange';
 import { SearchableSelect } from './SearchableSelect';
 import { Modal } from './Modal';
 
@@ -33,6 +34,13 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   const [curriculumOpen, setCurriculumOpen] = useState(false);
   const [selectedGroupId, setSelectedGroupId] = useState<string>(project.groups[0]?.id || '');
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>(project.teachers[0]?.id || '');
+  const [pendingSuggestion, setPendingSuggestion] = useState<{
+    lessonId: string;
+    day: string;
+    period: number;
+    suggestion: RearrangeSuggestion;
+  } | null>(null);
+  const [blockedLesson, setBlockedLesson] = useState<{ name: string; day: string; period: number } | null>(null);
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
 
@@ -159,28 +167,82 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     setWorkingSplits(next.splits);
   };
 
-  const moveLesson = (id: string, day: string, period: number) => {
+  const mainTeacherOf = (lesson: Lesson): string | undefined =>
+    lesson.teacherId || ruleById.get(lesson.ruleId)?.teacherId;
+
+  const commitFromMoves = (
+    id: string,
+    day: string,
+    period: number,
+    suggestion: RearrangeSuggestion | null
+  ) => {
     const poolLesson = poolLessons.find(l => l.id === id);
     const src = poolSource[id];
-    if (!poolLesson && !gridLessons.some(l => l.id === id)) return;
 
-    let grid: Lesson[];
+    if (!suggestion || suggestion.moves.length === 0) {
+      return;
+    }
+
+    const teacher = suggestion.teacherIdForMain ??
+      mainTeacherOf(poolLesson || gridLessons.find(l => l.id === id)!);
+
+    // Relocate all extra-move lessons first (they live on the grid).
+    let grid = gridLessons.map(l => ({ ...l }));
+    for (const m of suggestion.moves.slice(1)) {
+      grid = grid.map(l => (l.id === m.lessonId ? { ...l, day: m.toDay, period: m.toPeriod } : l));
+    }
+
+    // Apply the main move.
     let pool: Lesson[];
+    let splits = workingSplits;
     if (poolLesson) {
-      grid = [...gridLessons, { ...poolLesson, day, period }];
+      grid = [...grid, { ...poolLesson, day, period, teacherId: teacher }];
       pool = poolLessons.filter(l => l.id !== id);
+      // Placing a lesson unassigned in the OTHER semester shifts one hour from
+      // that semester to the one being edited.
+      if (src && src !== activeSemester) {
+        splits = adjustSplits(workingSplits, poolLesson.ruleId, src, activeSemester, 1);
+      }
     } else {
-      grid = gridLessons.map(l => (l.id === id ? { ...l, day, period } : l));
+      grid = grid.map(l => (l.id === id ? { ...l, day, period, teacherId: teacher } : l));
       pool = poolLessons;
     }
 
-    // Placing a lesson that was unassigned in the OTHER semester shifts one hour
-    // from that semester to the one being edited.
-    const nextSplits = poolLesson && src && src !== activeSemester
-      ? adjustSplits(workingSplits, poolLesson.ruleId, src, activeSemester, 1)
-      : workingSplits;
+    commit({ grid, pool, poolSource, splits });
+  };
 
-    commit({ grid, pool, poolSource, splits: nextSplits });
+  const moveLesson = (id: string, day: string, period: number) => {
+    const poolLesson = poolLessons.find(l => l.id === id);
+    const existing = gridLessons.find(l => l.id === id);
+    if (!poolLesson && !existing) return;
+
+    // The rearrange engine expects the moved lesson to be part of the schedule;
+    // for a pool placement we include it at the target so validation sees it.
+    const baseSchedule = existing
+      ? gridLessons
+      : [...gridLessons, { ...poolLesson!, day, period }];
+
+    const suggestion = suggestRearrange(project, baseSchedule, id, { day, period });
+    if (!suggestion.feasible) {
+      const name = poolLesson
+        ? getGroupName(poolLesson.groupId)
+        : getGroupName(existing!.groupId);
+      setBlockedLesson({ name, day, period });
+      return;
+    }
+
+    const isDirect = suggestion.moves.length === 1 && !suggestion.teacherIdForMain;
+    if (isDirect) {
+      commitFromMoves(id, day, period, suggestion);
+    } else {
+      setPendingSuggestion({ lessonId: id, day, period, suggestion });
+    }
+  };
+
+  const confirmSuggestion = () => {
+    if (!pendingSuggestion) return;
+    commitFromMoves(pendingSuggestion.lessonId, pendingSuggestion.day, pendingSuggestion.period, pendingSuggestion.suggestion);
+    setPendingSuggestion(null);
   };
 
   const unassignLesson = (id: string) => {
@@ -301,7 +363,8 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   };
 
   const periodFromEvent = (e: DragEvent): number => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
     const ratio = ((e.clientX ?? 0) - (rect.left ?? 0)) / Math.max(1, rect.width || 1);
     const clamped = Number.isFinite(ratio) ? ratio : 0;
     return Math.min(ALL_PERIODS.length, Math.max(1, Math.floor(clamped * ALL_PERIODS.length) + 1));
@@ -522,6 +585,49 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
             ))}
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={!!pendingSuggestion} onClose={() => setPendingSuggestion(null)} title={t('rearrange_confirm_title')}>
+        <p className="editor-hint">{t('rearrange_confirm_desc')}</p>
+        {pendingSuggestion && (
+          <div className="detail-list">
+            {pendingSuggestion.suggestion.moves.map((m, i) => {
+              const l = gridLessons.find(x => x.id === m.lessonId)
+                ?? poolLessons.find(x => x.id === m.lessonId);
+              const subj = l ? getSubject(l.subjectId) : undefined;
+              const gname = l ? getGroupName(l.groupId) : '';
+              const teacherChanged = i === 0 && pendingSuggestion.suggestion.teacherIdForMain;
+              const teacherName = teacherChanged
+                ? getTeacherName(pendingSuggestion.suggestion.teacherIdForMain)
+                : l ? getTeacherName(mainTeacherOf(l)) : '';
+              return (
+                <div key={`${m.lessonId}-${i}`} className="detail-row">
+                  <span className="detail-main">
+                    {subj?.shortName || subj?.name || '?'} — {gname}
+                    {teacherName && <span> ({teacherName})</span>}
+                    {teacherChanged && <span className="rearrange-swap"> → {getTeacherName(pendingSuggestion.suggestion.teacherIdForMain)}</span>}
+                  </span>
+                  <span className="detail-meta">
+                    {t('period')} {l?.period ?? '-'} → {m.toPeriod} • {t(m.toDay.toLowerCase())}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+          <button onClick={() => setPendingSuggestion(null)} className="secondary-btn">{t('rearrange_confirm_cancel')}</button>
+          <button onClick={confirmSuggestion} className="primary-btn">{t('rearrange_confirm_accept')}</button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!blockedLesson} onClose={() => setBlockedLesson(null)} title={t('rearrange_blocked_title')}>
+        <p className="editor-hint">
+          {t('rearrange_blocked_desc', { group: blockedLesson?.name, day: blockedLesson ? t(blockedLesson.day.toLowerCase()) : '', period: blockedLesson?.period })}
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+          <button onClick={() => setBlockedLesson(null)} className="primary-btn">{t('ok')}</button>
+        </div>
       </Modal>
     </div>
   );

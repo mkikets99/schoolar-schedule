@@ -82,6 +82,22 @@ header h1 {
   gap: 0.75rem;
 }
 
+.progress-track {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background-color: #333;
+  overflow: hidden;
+  border: 1px solid #444;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #646cff, #7c83ff);
+  transition: width 0.2s ease;
+}
+
 .worker-version {
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
@@ -92,6 +108,12 @@ header h1 {
   cursor: help;
   border: 1px solid #444;
   letter-spacing: 0.02em;
+}
+
+.rearrange-swap {
+  color: #7c83ff;
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .worker-version:hover {
