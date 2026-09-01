@@ -149,8 +149,8 @@ describe('InlineEditor', () => {
         { id: 'g2', name: '5-B', grade: 5, subgroups: [] },
       ],
       curriculum: [
-        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
-        { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 6, teacherId: 't1', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'subj1', hoursPerWeek: 6, teacherId: 't1', roomId: 'r1' },
       ],
       generatedSchedule: {
         schedule: [
@@ -437,7 +437,7 @@ describe('InlineEditor two-semester shared pool', () => {
     return {
       ...base,
       curriculum: [
-        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 3, teacherId: 't1', roomId: 'r1' },
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 6, teacherId: 't1', roomId: 'r1' },
       ],
       generatedSchedules: {
         semester1: {

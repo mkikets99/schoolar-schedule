@@ -24,8 +24,13 @@ const ld = (overrides: Partial<LoadDistribution> = {}): LoadDistribution => ({
 });
 
 describe('autoMaxPerDay', () => {
-  it('returns undefined without a load distribution', () => {
-    expect(autoMaxPerDay(rule(), [])).toBeUndefined();
+  it('falls back to the rule hours when there is no load distribution', () => {
+    expect(autoMaxPerDay(rule(), [])).toBe(1);
+    expect(autoMaxPerDay(rule({ hoursPerWeek: 8 }), [])).toBe(2);
+  });
+
+  it('returns undefined when neither load distribution nor rule hours set a load', () => {
+    expect(autoMaxPerDay(rule({ hoursPerWeek: 0 }), [])).toBeUndefined();
   });
 
   it('limits a >5h weekly load to 2 lessons per day', () => {
@@ -47,12 +52,13 @@ describe('autoMaxPerDay', () => {
     expect(autoMaxPerDay(rule({ doubleLesson: true }), [ld({ hours: 3 })])).toBe(2);
   });
 
-  it('returns undefined when no load-distribution entry matches the rule', () => {
-    expect(autoMaxPerDay(rule(), [ld({ subjectId: 'subj-b' })])).toBeUndefined();
-    expect(autoMaxPerDay(rule(), [ld({ groupId: 'g2' })])).toBeUndefined();
+  it('falls back to the rule hours when no load-distribution entry matches the rule', () => {
+    expect(autoMaxPerDay(rule(), [ld({ subjectId: 'subj-b' })])).toBe(1);
+    expect(autoMaxPerDay(rule({ hoursPerWeek: 8 }), [ld({ subjectId: 'subj-b' })])).toBe(2);
+    expect(autoMaxPerDay(rule({ hoursPerWeek: 0 }), [ld({ subjectId: 'subj-b' })])).toBeUndefined();
   });
 
-  it('picks the teacher-specific entry for a split subject', () => {
+  it('picks the teacher-specific entry for a split subject when load specifies it', () => {
     const entries = [
       ld({ hours: 2 }),
       ld({ teacherId: 't2', hours: 6 }),
@@ -88,17 +94,18 @@ describe('buildMaxDailyByRule', () => {
     };
     const map = buildMaxDailyByRule(project as any);
     expect(map.get('big')).toBe(2);
-    // 'small' matches no load-distribution entry -> no auto limit
-    expect(map.has('small')).toBe(false);
+    // 'small' matches no load-distribution entry but falls back to rule hours (4 -> 1/day)
+    expect(map.get('small')).toBe(1);
     expect(map.get('explicit')).toBe(1);
   });
 
-  it('ignores rules without a load distribution entirely', () => {
+  it('derives a limit from rule hours when no load distribution is present', () => {
     const map = buildMaxDailyByRule({
-      curriculum: [rule()],
+      curriculum: [rule({ id: 'c1', hoursPerWeek: 8 }), rule({ id: 'c2', hoursPerWeek: 4 })],
       loadDistribution: [],
       constraints: [],
     });
-    expect(map.has('c1')).toBe(false);
+    expect(map.get('c1')).toBe(2);
+    expect(map.get('c2')).toBe(1);
   });
 });

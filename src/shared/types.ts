@@ -210,25 +210,33 @@ export interface ProjectState {
 }
 
 /**
- * Automatic per-rule daily lesson limit derived from the load distribution.
+ * Automatic per-rule daily lesson limit.
  *
  * A lesson may appear at most once per day when its weekly load is 5 hours or
  * less, and at most twice per day when the load exceeds 5 hours. Rules marked
- * `doubleLesson` always keep their pair allowance (2 lessons per day). Returns
- * `undefined` when no load-distribution entry matches the rule, so only an
- * explicit MAX_DAILY_LESSONS constraint can limit it.
+ * `doubleLesson` always keep their pair allowance (2 lessons per day).
+ *
+ * The weekly load is read from the load distribution when it establishes one for
+ * the rule (matched by group+subject, narrowed to its own teacher for split
+ * rules). When the distribution is absent or establishes no load, the rule's own
+ * `hoursPerWeek` is used as a fallback so heavy rules - including each subgroup
+ * of a split subject - still get a sensible automatic daily cap. Returns
+ * `undefined` only when nothing establishes a positive weekly load.
  */
 export function autoMaxPerDay(rule: CurriculumRule, loadDistribution: LoadDistribution[]): number | undefined {
-  if (!loadDistribution || loadDistribution.length === 0) return undefined;
-  let matches = loadDistribution.filter(
-    (l) => l.groupId === rule.groupId && l.subjectId === rule.subjectId
-  );
-  if (rule.teacherId) {
-    const byTeacher = matches.filter((l) => l.teacherId === rule.teacherId);
-    if (byTeacher.length > 0) matches = byTeacher;
+  let hours = 0;
+  if (loadDistribution && loadDistribution.length > 0) {
+    let matches = loadDistribution.filter(
+      (l) => l.groupId === rule.groupId && l.subjectId === rule.subjectId
+    );
+    if (rule.teacherId) {
+      const byTeacher = matches.filter((l) => l.teacherId === rule.teacherId);
+      if (byTeacher.length > 0) matches = byTeacher;
+    }
+    hours = matches.reduce((sum, l) => sum + (l.hours || 0), 0);
   }
-  if (matches.length === 0) return undefined;
-  const hours = matches.reduce((sum, l) => sum + (l.hours || 0), 0);
+  // Fall back to the rule's own weekly hours so the cap still follows the rule.
+  if (!(hours > 0) && (rule.hoursPerWeek || 0) > 0) hours = rule.hoursPerWeek;
   if (!(hours > 0)) return undefined;
   if (rule.doubleLesson) return 2;
   return hours > 5 ? 2 : 1;
