@@ -7,16 +7,16 @@ import { Modal } from './Modal';
 import { InlineEditor } from './InlineEditor';
 import { SearchableSelect } from './SearchableSelect';
 import { analyzeEmptySlots } from '../services/scheduleAnalyzer';
-import { CurriculumRule, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, LockedLesson, ScheduleResult, SemesterSplit } from '../../shared/types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }) => {
   const { t } = useTranslation();
-  const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits } = useProject();
+  const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits, updateLockedLessons } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
-  const [editMode, setEditMode] = useState<'view' | 'group' | 'teacher'>('view');
+  const [editMode, setEditMode] = useState<'view' | 'edit'>('view');
   const scheduleResult = project?.generatedSchedules
     ? project.generatedSchedules[activeSemester]
     : project?.generatedSchedule;
@@ -313,6 +313,21 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
     if (splits) updateGeneratedSplits(splits);
   };
 
+  // Double-clicking a lesson in the editor pins it against future generation:
+  // the lock is stored keyed by rule + slot so it survives regenerated lesson ids.
+  const handleToggleLock = (lesson: Lesson) => {
+    if (!project) return;
+    const isSplit = Boolean(project.generatedSchedules);
+    const semester = isSplit ? activeSemester : undefined;
+    const current = project.lockedLessons || [];
+    const exists = current.some(l =>
+      l.ruleId === lesson.ruleId && l.day === lesson.day && l.period === lesson.period && l.semester === semester
+    );
+    updateLockedLessons(exists
+      ? current.filter(l => !(l.ruleId === lesson.ruleId && l.day === lesson.day && l.period === lesson.period && l.semester === semester))
+      : [...current, { ruleId: lesson.ruleId, day: lesson.day, period: lesson.period, semester } as LockedLesson]);
+  };
+
   const hasSchedule = schedule.length > 0;
 
   return (
@@ -336,44 +351,44 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
         </div>
 
         <div className="mode-toggle">
-          <button className={`mode-btn ${editMode === 'view' ? 'active' : ''}`} onClick={() => setEditMode('view')}>{t('mode_view')}</button>
-          <button className={`mode-btn ${editMode === 'group' ? 'active' : ''}`} onClick={() => setEditMode('group')} disabled={!hasSchedule}>{t('mode_edit')}</button>
-          <button className={`mode-btn ${editMode === 'teacher' ? 'active' : ''}`} onClick={() => setEditMode('teacher')} disabled={!hasSchedule}>{t('mode_edit_teacher')}</button>
+          {editMode === 'view' ? (
+            <button className="mode-btn" onClick={() => setEditMode('edit')} disabled={!hasSchedule}>{t('mode_edit')}</button>
+          ) : (
+            <button className="mode-btn active" onClick={() => setEditMode('view')}>{t('mode_view')}</button>
+          )}
         </div>
 
-        {editMode === 'view' && (
-          <>
-            <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
-              <option value="all">{t('all')}</option>
-              <option value="group">{t('view_group')}</option>
-              <option value="teacher">{t('view_teacher')}</option>
-              <option value="subject">{t('view_subject')}</option>
-            </select>
+        <div className="viewer-filter">
+          <select value={filterType} onChange={(e) => { setFilterType(e.target.value as any); setFilterId(''); }}>
+            <option value="all">{t('all')}</option>
+            <option value="group">{t('view_group')}</option>
+            <option value="teacher">{t('view_teacher')}</option>
+            <option value="subject">{t('view_subject')}</option>
+          </select>
 
-            {filterType !== 'all' && (
-              <SearchableSelect
-                value={filterId}
-                onChange={setFilterId}
-                options={filterType === 'group'
-                  ? groups.map(g => ({ value: g.id, label: g.name }))
-                  : filterType === 'teacher'
-                  ? teachers.map(t => ({ value: t.id, label: t.name }))
-                  : subjects.map(s => ({ value: s.id, label: s.name }))}
-                placeholder={t('select_view', { type: filterType })}
-                allowEmpty
-                pinTop={filterType === 'teacher' ? loadTeacherIds : []}
-              />
-            )}
+          {filterType !== 'all' && (
+            <SearchableSelect
+              value={filterId}
+              onChange={setFilterId}
+              options={filterType === 'group'
+                ? groups.map(g => ({ value: g.id, label: g.name }))
+                : filterType === 'teacher'
+                ? teachers.map(t => ({ value: t.id, label: t.name }))
+                : subjects.map(s => ({ value: s.id, label: s.name }))}
+              placeholder={t('select_view', { type: filterType })}
+              allowEmpty
+              pinTop={filterType === 'teacher' ? loadTeacherIds : []}
+            />
+          )}
 
-            {filterType === 'all' && (
-              <div className="summary-badge">
-                {schedule.length} {t('lessons_assigned').toLowerCase()}
-                {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
-                {gapCount > 0 && <span className="gap-count"> • {gapCount} {t('unfilled_gaps').toLowerCase()}</span>}
-              </div>
-            )}
-          </>
-        )}
+          {editMode === 'view' && filterType === 'all' && (
+            <div className="summary-badge">
+              {schedule.length} {t('lessons_assigned').toLowerCase()}
+              {conflictKeys.size > 0 && <span className="conflict-count"> • {conflictKeys.size} {t('conflicts').toLowerCase()}</span>}
+              {gapCount > 0 && <span className="gap-count"> • {gapCount} {t('unfilled_gaps').toLowerCase()}</span>}
+            </div>
+          )}
+        </div>
 
         {hasSchedule && (
           <div className="export-actions">
@@ -426,7 +441,8 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                 active={editMode !== 'view'}
                 sessionKey={editorSession}
                 onSave={handleEditorSave}
-                editMode={editMode === 'view' ? 'group' : editMode}
+                filter={{ type: filterType, id: filterId }}
+                onToggleLock={handleToggleLock}
               />
             </div>
           )}

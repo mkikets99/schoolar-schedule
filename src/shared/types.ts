@@ -110,6 +110,25 @@ export interface SemesterSchedules {
   semester2: ScheduleResult;
 }
 
+/**
+ * A lesson pinned in place for future generations. Identified by the curriculum
+ * rule and the exact slot so it survives regeneration (lesson ids are re-rolled
+ * every run). `semester` scopes the pin to one semester; a lock without a
+ * semester applies to both (legacy single-schedule projects).
+ */
+export interface LockedLesson {
+  ruleId: string;
+  day: string;
+  period: number;
+  semester?: 'semester1' | 'semester2';
+}
+
+/** How the schedule grid filters lessons: an entity kind and its id. */
+export interface ScheduleFilter {
+  type: 'all' | 'group' | 'teacher' | 'subject';
+  id: string;
+}
+
 export interface GroupScheduleConfig {
   periodStart: number;
   periodEnd: number;
@@ -207,6 +226,7 @@ export interface ProjectState {
   generatedSchedule?: ScheduleResult; // legacy single-schedule results (older exports)
   generatedSchedules?: SemesterSchedules;
   generatedSplits?: SemesterSplit[];
+  lockedLessons?: LockedLesson[]; // lessons pinned against future generation
 }
 
 /**

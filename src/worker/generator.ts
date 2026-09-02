@@ -1,4 +1,4 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson } from '../shared/types';
 import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -153,7 +153,9 @@ export function autoResolveUnassigned(project: ProjectState, schedule: any[], co
 
   const kept: any[] = [];
   for (const conflict of conflicts) {
-    if (conflict?.type !== 'UNASSIGNED_HOURS' || !conflict.ruleId) {
+    // Conflicts marked `locked` come from unhonorable locks: the lesson is
+    // pinned to its slot and must never be auto-resolved somewhere else.
+    if (conflict?.type !== 'UNASSIGNED_HOURS' || !conflict.ruleId || conflict.locked) {
       kept.push(conflict);
       continue;
     }
@@ -410,6 +412,17 @@ async function runGenerate(
   // (>5 weekly hours -> 2 lessons/day, otherwise 1/day, doubles keep a pair).
   const maxDailyByRule = buildMaxDailyByRule(project);
 
+  // Locked lessons reserve their exact rule + slot for the whole generation: no
+  // other unit of that rule may be placed there (greedy or auto-resolve), and a
+  // lock that does not fit stays locked - the lesson is reported unassigned
+  // instead of silently moving elsewhere.
+  const lockedSlotsByRule = new Map<string, Set<string>>();
+  for (const lock of project.lockedLessons || []) {
+    if (!DAYS.includes(lock.day) || !(lock.period >= 1 && lock.period <= 12)) continue;
+    if (!lockedSlotsByRule.has(lock.ruleId)) lockedSlotsByRule.set(lock.ruleId, new Set());
+    lockedSlotsByRule.get(lock.ruleId)!.add(`${lock.day}-${lock.period}`);
+  }
+
   const teacherBusy = new Set<string>();
   const groupBusy = new Set<string>();
   const roomBusy = new Set<string>();
@@ -533,6 +546,12 @@ async function runGenerate(
   }
 
   units.sort((a, b) => {
+    const ga = groupGrade.get(a.groupId) ?? 0;
+    const gb = groupGrade.get(b.groupId) ?? 0;
+    if (ga !== gb) return ga - gb;
+    const la = groupConfig.get(a.groupId)?.maxDaily ?? 8;
+    const lb = groupConfig.get(b.groupId)?.maxDaily ?? 8;
+    if (la !== lb) return la - lb;
     const da = a.type === 'double' ? 0 : 1;
     const db = b.type === 'double' ? 0 : 1;
     if (da !== db) return da - db;
@@ -545,6 +564,30 @@ async function runGenerate(
     return a.lessons[0]?.id.localeCompare(b.lessons[0]?.id || '') || 0;
   });
 
+  // Units are processed by the priority chain above (grade ascending, then tighter
+  // daily limits, then doubles); the per-attempt shuffle only scrambles the order
+  // *within* a fully-tied bucket so every attempt still satisfies those priorities.
+  const shuffleTieBuckets = (arr: SchedulingUnit[], rngFn: () => number): SchedulingUnit[] => {
+    const out: SchedulingUnit[] = [];
+    let run: SchedulingUnit[] = [];
+    let lastKey = '';
+    for (const u of arr) {
+      const key = `${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}`;
+      if (key !== lastKey && run.length > 0) {
+        shuffleInPlace(run, rngFn);
+        out.push(...run);
+        run = [];
+      }
+      lastKey = key;
+      run.push(u);
+    }
+    if (run.length > 0) {
+      shuffleInPlace(run, rngFn);
+      out.push(...run);
+    }
+    return out;
+  };
+
   if (rng && pinnedRuleIds && pinnedRuleIds.size > 0) {
     const pinned: SchedulingUnit[] = [];
     const rest: SchedulingUnit[] = [];
@@ -552,15 +595,14 @@ async function runGenerate(
       (pinnedRuleIds.has(u.lessons[0].ruleId) ? pinned : rest).push(u);
     }
     shuffleInPlace(pinned, rng);
-    shuffleInPlace(rest, rng);
-    units = pinned.concat(rest);
+    units = pinned.concat(shuffleTieBuckets(rest, rng));
   } else if (rng) {
-    shuffleInPlace(units, rng);
+    units = shuffleTieBuckets(units, rng);
   }
 
   const schedule: any[] = [];
   const conflicts: any[] = [];
-  const totalUnits = units.length;
+  let totalUnits = units.length;
   let unitsAssigned = 0;
 
   emit({ type: 'PROGRESS', payload: { progress: 5 } });
@@ -581,8 +623,10 @@ async function runGenerate(
     );
   }
 
-  function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean): boolean {
+  function canPlace(lesson: LessonStub, day: string, period: number, skipGroupCheck: boolean, allowLockedRuleSlot = false): boolean {
     const slotKey = `${day}-${period}`;
+    const lockedRuleSlot = lockedSlotsByRule.get(lesson.ruleId);
+    if (lockedRuleSlot && lockedRuleSlot.has(slotKey) && !allowLockedRuleSlot) return false;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
     if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
     if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
@@ -636,7 +680,7 @@ async function runGenerate(
     }
   }
 
-  function tryPlaceDouble(unit: SchedulingUnit, day: string, period: number): boolean {
+  function tryPlaceDouble(unit: SchedulingUnit, day: string, period: number, allowLockedRuleSlot = false): boolean {
     const lesson = unit.lessons[0];
     const cfg = groupConfig.get(unit.groupId);
     const pEnd = cfg?.periodEnd ?? 8;
@@ -647,8 +691,8 @@ async function runGenerate(
       const counts = ruleDailyCounts.get(lesson.ruleId)!;
       if (counts[di] + 2 > cap) return false;
     }
-    if (!canPlace(lesson, day, period, false)) return false;
-    if (!canPlace(lesson, day, period + 1, false)) return false;
+    if (!canPlace(lesson, day, period, false, allowLockedRuleSlot)) return false;
+    if (!canPlace(lesson, day, period + 1, false, allowLockedRuleSlot)) return false;
     placeLesson(lesson, day, period);
     placeLesson(unit.lessons[1], day, period + 1);
     return true;
@@ -677,15 +721,15 @@ async function runGenerate(
     }
   }
 
-  function tryPlaceUnit(unit: SchedulingUnit, day: string, period: number): boolean {
+  function tryPlaceUnit(unit: SchedulingUnit, day: string, period: number, allowLockedRuleSlot = false): boolean {
     if (unit.type === 'single') {
-      if (!canPlace(unit.lessons[0], day, period, false)) return false;
+      if (!canPlace(unit.lessons[0], day, period, false, allowLockedRuleSlot)) return false;
       placeLesson(unit.lessons[0], day, period);
       return true;
     }
 
     if (unit.type === 'double') {
-      return tryPlaceDouble(unit, day, period);
+      return tryPlaceDouble(unit, day, period, allowLockedRuleSlot);
     }
 
     const first = unit.lessons[0];
@@ -696,7 +740,7 @@ async function runGenerate(
     if (counts && counts[days.indexOf(day)] + unitSlotCount(unit) > maxDaily) return false;
 
     for (const lesson of unit.lessons) {
-      if (!canPlace(lesson, day, period, true)) return false;
+      if (!canPlace(lesson, day, period, true, allowLockedRuleSlot)) return false;
     }
 
     for (const lesson of unit.lessons) {
@@ -765,6 +809,49 @@ async function runGenerate(
       if (sa !== sb) return sb - sa;
       return (a - b) + (rng ? rng() - 0.5 : 0);
     });
+  }
+
+  // Locked lessons are pinned before greedy placement: each lock consumes one
+  // matching unit placed at its exact slot (so every other lesson avoids the
+  // group/teacher/room there). A lock that cannot be honored stays LOCKED - the
+  // lesson is reported unassigned (conflict) instead of being moved elsewhere,
+  // and its slot stays reserved for the rule.
+  const lockedSlots = new Set<string>();
+  if (project.lockedLessons && project.lockedLessons.length > 0) {
+    const lockByRule = new Map<string, LockedLesson[]>();
+    for (const lock of project.lockedLessons) {
+      if (!DAYS.includes(lock.day) || !(lock.period >= 1 && lock.period <= 12)) continue;
+      if (!lockByRule.has(lock.ruleId)) lockByRule.set(lock.ruleId, []);
+      lockByRule.get(lock.ruleId)!.push(lock);
+    }
+    const placedUnits = new Set<SchedulingUnit>();
+    for (const [ruleId, locks] of lockByRule) {
+      for (const lock of locks) {
+        const unit = units.find((u) => !placedUnits.has(u) && u.lessons[0].ruleId === ruleId);
+        if (!unit) continue;
+        // A locked slot outside the group's lesson window cannot be honored.
+        const lockCfg = groupConfig.get(unit.groupId);
+        if (lock.period < (lockCfg?.periodStart ?? 1) || lock.period > (lockCfg?.periodEnd ?? 8)) {
+          placedUnits.add(unit);
+          conflicts.push({ type: 'UNASSIGNED_HOURS', ruleId, missing: 1, locked: true });
+          continue;
+        }
+        // allowLockedRuleSlot=true lets the lock claim its own reserved slot; the
+        // greedy loop below is barred from it via canPlace.
+        if (tryPlaceUnit(unit, lock.day, lock.period, true)) {
+          placedUnits.add(unit);
+          unitsAssigned++;
+          lockedSlots.add(`${ruleId}|${lock.day}|${lock.period}`);
+        } else {
+          placedUnits.add(unit);
+          conflicts.push({ type: 'UNASSIGNED_HOURS', ruleId, missing: 1, locked: true });
+        }
+      }
+    }
+    if (placedUnits.size > 0) {
+      units = units.filter((u) => !placedUnits.has(u));
+      totalUnits = units.length;
+    }
   }
 
   for (const unit of units) {
@@ -838,7 +925,7 @@ async function runGenerate(
 
   autoResolveUnassigned(project, schedule, conflicts);
 
-  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, rng, optimizePasses);
+  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, rng, optimizePasses, lockedSlots);
 
   const totalBatches = units.length;
   return {
@@ -947,9 +1034,12 @@ function optimizeGaps(
   noFirstRules: { subjectId: string; groupId?: string }[],
   groupConfig: Map<string, GroupScheduleConfig>,
   rng: (() => number) | undefined,
-  maxPasses: number
+  maxPasses: number,
+  lockedSlots: Set<string> = new Set()
 ): void {
   if (schedule.length === 0) return;
+
+  const isLocked = (lesson: any) => lockedSlots.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`);
 
   const dayMap = new Map<string, number[]>();
   for (const lesson of schedule) {
@@ -986,10 +1076,10 @@ function optimizeGaps(
         let bestSwap: { a: any; b: any; delta: number } | null = null;
         for (let cell = pPrev + 1; cell < pCur; cell++) {
           const bLesson = schedule.find(l => l.day === entry.day && l.period === cell);
-          if (!bLesson || bLesson.teacherId === entry.tid) continue;
+          if (!bLesson || bLesson.teacherId === entry.tid || isLocked(bLesson)) continue;
           for (const target of [pPrev, pCur]) {
             const aLesson = schedule.find(l => l.teacherId === entry.tid && l.day === entry.day && l.period === target);
-            if (!aLesson || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig)) continue;
+            if (!aLesson || isLocked(aLesson) || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig)) continue;
             const delta = swapGapDelta(schedule, aLesson, bLesson);
             if (bestSwap === null || delta < bestSwap.delta) {
               bestSwap = { a: aLesson, b: bLesson, delta };
@@ -1091,7 +1181,11 @@ export function buildSemesterProject(
       return { ...rule, hoursPerWeek: hours };
     })
     .filter((rule): rule is CurriculumRule => rule !== null);
-  return { ...project, curriculum };
+  const semesterKey = semester === 1 ? 'semester1' : 'semester2';
+  const lockedLessons = (project.lockedLessons || []).filter(
+    (l) => !l.semester || l.semester === semesterKey
+  );
+  return { ...project, curriculum, lockedLessons };
 }
 
 function collectUnassigned(result: ScheduleResult): Map<string, number> {

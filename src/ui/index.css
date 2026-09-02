@@ -640,6 +640,14 @@ tr.unassigned {
   border-radius: 4px;
 }
 
+.viewer-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
 .semester-switcher {
   display: flex;
   gap: 0.25rem;
@@ -1668,6 +1676,23 @@ tr.split-group + tr.split-group td {
 .timeline-lesson.conflict {
   background: #2a1a1a;
   border-left-color: #ff4d4d;
+}
+
+.timeline-lesson.locked {
+  background: #1f2a1f;
+  border-left-color: #4caf50;
+}
+
+.timeline-lesson-lock-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: #4caf50;
+  border-radius: 3px;
+  font-size: 0.5rem;
+  color: #fff;
+  padding: 0 3px;
+  line-height: 1.4;
 }
 
 .timeline-lesson-subject {

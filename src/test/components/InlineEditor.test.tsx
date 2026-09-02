@@ -164,7 +164,7 @@ describe('InlineEditor', () => {
       },
     };
     const onSave = vi.fn();
-    const { container } = render(<InlineEditor project={project} activeSemester="semester1" onSave={onSave} />);
+    const { container } = render(<InlineEditor project={project} activeSemester="semester1" onSave={onSave} filter={{ type: 'group', id: 'g1' }} />);
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
     fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
@@ -210,25 +210,21 @@ describe('InlineEditor', () => {
   });
 
   it('shows only the selected class lessons on the timeline and pool', () => {
-    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'group', id: 'g1' }} />);
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
     expect(container.querySelectorAll('.checker-chip').length).toBe(1);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A');
   });
 
-  it('switching the class selector shows that class lessons', () => {
-    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
-    fireEvent.click(container.querySelector('.inline-editor-toolbar .combobox-trigger')!);
-    const option = Array.from(container.querySelectorAll('.combobox-option')).find(
-      el => el.getAttribute('data-value') === 'g2'
-    )!;
-    fireEvent.click(option);
+  it('re-rendering with another class filter shows that class lessons', () => {
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'group', id: 'g2' }} />);
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-B');
   });
 
   it('still flags conflicts with another class sharing teacher and room', () => {
-    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    const { container } = render(<InlineEditor project={makeTwoGroupProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'group', id: 'g1' }} />);
     const lesson = container.querySelector('.timeline-lesson')!;
     expect(lesson.className).toContain('conflict');
     const title = (container.querySelector('.timeline-lesson') as HTMLElement).title;
@@ -240,7 +236,7 @@ describe('InlineEditor', () => {
   });
 
   it('counts a split lesson (same group+subject in one slot) as 1 unassigned in the checker', () => {
-    const { container } = render(<InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} />);
+    const { container } = render(<InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'group', id: 'g1' }} />);
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
     expect(container.querySelectorAll('.checker-chip').length).toBe(2);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('5-A (1)');
@@ -263,22 +259,17 @@ describe('InlineEditor', () => {
 describe('InlineEditor teacher edit mode', () => {
   it('shows only the selected teacher lessons across all classes', () => {
     const { container } = render(
-      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'teacher', id: 't1' }} />
     );
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
     expect(container.querySelectorAll('.checker-chip').length).toBe(1);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Anna');
   });
 
-  it('switching the teacher selector shows that teacher lessons', () => {
+  it('re-rendering with another teacher filter shows that teacher lessons', () => {
     const { container } = render(
-      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'teacher', id: 't2' }} />
     );
-    fireEvent.click(container.querySelector('.inline-editor-toolbar .combobox-trigger')!);
-    const option = Array.from(container.querySelectorAll('.combobox-option')).find(
-      el => el.getAttribute('data-value') === 't2'
-    )!;
-    fireEvent.click(option);
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Bohdan');
     const lesson = container.querySelector('.timeline-lesson')!;
@@ -287,7 +278,7 @@ describe('InlineEditor teacher edit mode', () => {
 
   it('lists only the selected teacher rules in the curriculum distribution modal', () => {
     const { container } = render(
-      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+      <InlineEditor project={makeSplitProject()} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'teacher', id: 't1' }} />
     );
     fireEvent.click(screen.getByText('editor_curriculum_distribution'));
     const rows = Array.from(container.querySelectorAll('.detail-row'));
@@ -327,7 +318,7 @@ describe('InlineEditor teacher edit mode', () => {
       },
     };
     const { container } = render(
-      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'teacher', id: 't1' }} />
     );
     expect(container.querySelector('.checker-zone-title')!.textContent).toContain('Anna (0)');
     expect(container.querySelector('.checker-empty')).toBeTruthy();
@@ -364,7 +355,7 @@ describe('InlineEditor teacher edit mode', () => {
       },
     };
     const { container } = render(
-      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} editMode="teacher" />
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} filter={{ type: 'teacher', id: 't1' }} />
     );
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
@@ -494,5 +485,54 @@ describe('InlineEditor two-semester shared pool', () => {
     const c1 = splits.find(s => s.ruleId === 'c1');
     expect(c1.first).toBe(4);
     expect(c1.second).toBe(2);
+  });
+});
+
+describe('InlineEditor lesson locks', () => {
+  it('marks a locked lesson with a badge and toggles it on double-click', () => {
+    const onToggleLock = vi.fn();
+    const project: ProjectState = {
+      ...makeProject(),
+      lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1 }],
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} onToggleLock={onToggleLock} />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    expect(lesson.className).toContain('locked');
+    expect(lesson.querySelector('.timeline-lesson-lock-badge')).toBeTruthy();
+
+    fireEvent.doubleClick(lesson);
+    expect(onToggleLock).toHaveBeenCalledTimes(1);
+    expect(onToggleLock.mock.calls[0][0]).toMatchObject({ ruleId: 'c1', day: 'Monday', period: 1 });
+  });
+
+  it('hints to unlock a locked lesson and to lock a free one', () => {
+    const project: ProjectState = {
+      ...makeProject(),
+      lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1 }],
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} onToggleLock={vi.fn()} />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    expect((lesson as HTMLElement).title).toContain('click_to_unlock_lesson');
+  });
+
+  it('does not show a lock badge for lessons of the other semester', () => {
+    const project: ProjectState = {
+      ...makeProject(),
+      generatedSchedules: {
+        semester1: makeProject().generatedSchedule!,
+        semester2: makeProject().generatedSchedule!,
+      },
+      generatedSplits: [{ ruleId: 'c1', hoursPerWeek: 2, first: 1, second: 1 }],
+      lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1, semester: 'semester2' }],
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} onToggleLock={vi.fn()} />
+    );
+    const lesson = container.querySelector('.timeline-lesson')!;
+    expect(lesson.className).not.toContain('locked');
   });
 });

@@ -50,6 +50,7 @@ export interface RearrangeContext {
   groupConfig: Map<string, GroupScheduleConfig>;
   ruleById: Map<string, CurriculumRule>;
   teachers: Teacher[];
+  lockedSlots: Set<string>;
   isBusy: (teacherId: string, day: string, period: number) => boolean;
   mainTeacherIdOf: (l: PlacableLesson) => string | undefined;
   buildOccupancy: (schedule: Lesson[], excludeIds: Set<string>) => SlotOccupancy;
@@ -58,7 +59,7 @@ export interface RearrangeContext {
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
 }
 
-export function createRearrangeContext(project: ProjectState): RearrangeContext {
+export function createRearrangeContext(project: ProjectState, semester?: 'semester1' | 'semester2'): RearrangeContext {
   const teacherBusyRules: BusyRule[] = [];
   const noFirstRules: { subjectId: string; groupId?: string }[] = [];
   for (const c of project.constraints || []) {
@@ -71,6 +72,14 @@ export function createRearrangeContext(project: ProjectState): RearrangeContext 
   const maxDailyByRule = buildMaxDailyByRule(project);
   const groupConfig = new Map((project.groups || []).map((g) => [g.id, computeGroupScheduleConfig(g)]));
   const ruleById = new Map((project.curriculum || []).map((r) => [r.id, r]));
+
+  // Lessons pinned against movement: identified by rule + slot (semester-scoped
+  // when the context knows the semester). The relocation cascade never moves one.
+  const lockedSlots = new Set<string>();
+  for (const lock of project.lockedLessons || []) {
+    if (semester && lock.semester && lock.semester !== semester) continue;
+    lockedSlots.add(`${lock.ruleId}|${lock.day}|${lock.period}`);
+  }
 
   const isBusy = (teacherId: string, day: string, period: number) =>
     teacherBusyRules.some(
@@ -182,6 +191,7 @@ export function createRearrangeContext(project: ProjectState): RearrangeContext 
     groupConfig,
     ruleById,
     teachers: project.teachers || [],
+    lockedSlots,
     isBusy,
     mainTeacherIdOf,
     buildOccupancy,
@@ -247,6 +257,7 @@ function resolvePlacement(
   ): { moves: RearrangeMove[]; excluded: Set<string> } | null => {
     if (searchNodes > NODE_BUDGET) return null;
     searchNodes++;
+    if (ctx.lockedSlots.has(`${o.ruleId}|${o.day}|${o.period}`)) return null;
     const cfgO = groupConfig.get(o.groupId);
     const startO = cfgO?.periodStart ?? 1;
     const endO = cfgO?.periodEnd ?? 8;
@@ -464,11 +475,12 @@ export function suggestRearrangeChoices(
   project: ProjectState,
   schedule: Lesson[],
   lessonId: string,
-  target: { day: string; period: number }
+  target: { day: string; period: number },
+  semester?: 'semester1' | 'semester2'
 ): RearrangeSuggestion[] {
   const lesson = schedule.find((l) => l.id === lessonId);
   if (!lesson) return [{ feasible: false, moves: [], reason: 'NO_SPACE' }];
-  return resolvePlacement(createRearrangeContext(project), schedule, lesson, target, true, 15);
+  return resolvePlacement(createRearrangeContext(project, semester), schedule, lesson, target, true, 15);
 }
 
 /**
@@ -492,7 +504,8 @@ export function suggestRearrange(
   schedule: Lesson[],
   lessonId: string,
   target: { day: string; period: number },
-  reassignTeacherId?: string
+  reassignTeacherId?: string,
+  semester?: 'semester1' | 'semester2'
 ): RearrangeSuggestion {
   const lesson = schedule.find((l) => l.id === lessonId);
   if (!lesson) return { feasible: false, moves: [], reason: 'NO_SPACE' };
@@ -500,7 +513,7 @@ export function suggestRearrange(
   // A reassignTeacherId request disables the substitute search (the caller
   // already picked the teacher); otherwise the engine tries substitutes.
   const choices = resolvePlacement(
-    createRearrangeContext(project),
+    createRearrangeContext(project, semester),
     schedule,
     lesson,
     target,

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, ScheduleFilter, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
 import { suggestRearrangeChoices } from '../../worker/rearrange';
-import { SearchableSelect } from './SearchableSelect';
 import { Modal } from './Modal';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -14,7 +13,8 @@ interface InlineEditorProps {
   project: ProjectState;
   activeSemester: 'semester1' | 'semester2';
   onSave: (result: ScheduleResult, splits?: SemesterSplit[]) => void;
-  editMode?: 'group' | 'teacher';
+  filter?: ScheduleFilter;
+  onToggleLock?: (lesson: Lesson) => void;
   active?: boolean;
   sessionKey?: number;
 }
@@ -26,7 +26,7 @@ interface HistoryEntry {
   splits: SemesterSplit[];
 }
 
-export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'group', active = true, sessionKey }: InlineEditorProps) => {
+export const InlineEditor = ({ project, activeSemester, onSave, filter = { type: 'all', id: '' }, onToggleLock, active = true, sessionKey }: InlineEditorProps) => {
   const { t } = useTranslation();
   const [gridLessons, setGridLessons] = useState<Lesson[]>([]);
   const [poolLessons, setPoolLessons] = useState<Lesson[]>([]);
@@ -34,8 +34,6 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   const [workingSplits, setWorkingSplits] = useState<SemesterSplit[]>([]);
   const [hover, setHover] = useState<{ day: string; period: number } | null>(null);
   const [curriculumOpen, setCurriculumOpen] = useState(false);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(project.groups[0]?.id || '');
-  const [selectedTeacherId, setSelectedTeacherId] = useState<string>(project.teachers[0]?.id || '');
   const [pendingSuggestion, setPendingSuggestion] = useState<{
     lessonId: string;
     day: string;
@@ -63,7 +61,33 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
 
   const ruleById = useMemo(() => new Map((project.curriculum || []).map(r => [r.id, r])), [project.curriculum]);
   const lessonTeacherId = (lesson: Lesson) => lesson.teacherId || ruleById.get(lesson.ruleId)?.teacherId;
-  const belongsToTeacher = (lesson: Lesson, teacherId: string) => lessonTeacherId(lesson) === teacherId;
+
+  const matchesFilter = (lesson: Lesson): boolean => {
+    if (filter.type === 'all') return true;
+    if (filter.type === 'group') return lesson.groupId === filter.id;
+    if (filter.type === 'teacher') return lessonTeacherId(lesson) === filter.id;
+    if (filter.type === 'subject') return lesson.subjectId === filter.id;
+    return true;
+  };
+
+  // Locked lessons (pinned against future generation) render with a lock badge
+  // in this semester's editor and are toggled by double-clicking the lesson.
+  const lockedKeys = useMemo(
+    () => new Set(
+      (project.lockedLessons || [])
+        .filter(l => !l.semester || l.semester === activeSemester)
+        .map(l => `${l.ruleId}|${l.day}|${l.period}`)
+    ),
+    [project.lockedLessons, activeSemester]
+  );
+
+  const filterLabel = filter.type === 'all'
+    ? t('all')
+    : filter.type === 'group'
+    ? getGroupName(filter.id) || filter.id
+    : filter.type === 'teacher'
+    ? getTeacherName(filter.id) || filter.id
+    : getSubject(filter.id)?.name || filter.id;
 
   const makePending = (rule: CurriculumRule, id: string): Lesson => ({
     id,
@@ -248,13 +272,13 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
       ? gridLessons
       : [...gridLessons, { ...poolLesson!, day, period }];
 
-    const choices = suggestRearrangeChoices(project, baseSchedule, id, { day, period });
+    const choices = suggestRearrangeChoices(project, baseSchedule, id, { day, period }, activeSemester);
     const movedTeacherId = poolLesson ? lessonTeacherId(poolLesson) : lessonTeacherId(existing!);
 
-    // In teacher edit mode a solution must NOT reassign the lesson to another
+    // In teacher filter mode a solution must NOT reassign the lesson to another
     // teacher - drops that would do so are treated as blocked.
     const feasible = choices.filter(c => c.feasible &&
-      (editMode !== 'teacher' || !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId));
+      (filter.type !== 'teacher' || !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId));
 
     // The rearrange engine (up to 15 swaps deep) could not open the slot, but a
     // manual edit may still place the lesson there - the analyzer flags whatever
@@ -335,24 +359,20 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   );
 
   const visibleGrid = useMemo(
-    () => gridLessons.filter(l =>
-      editMode === 'teacher' ? belongsToTeacher(l, selectedTeacherId) : l.groupId === selectedGroupId
-    ),
-    [gridLessons, selectedGroupId, selectedTeacherId, editMode, ruleById]
+    () => gridLessons.filter(matchesFilter),
+    [gridLessons, filter]
   );
   const visiblePool = useMemo(
-    () => poolLessons.filter(l =>
-      editMode === 'teacher' ? belongsToTeacher(l, selectedTeacherId) : l.groupId === selectedGroupId
-    ),
-    [poolLessons, selectedGroupId, selectedTeacherId, editMode, ruleById]
+    () => poolLessons.filter(matchesFilter),
+    [poolLessons, filter]
   );
   const visibleConflictCount = useMemo(
     () => new Set(
       visibleGrid
         .filter(l => (analysis.byLesson.get(l.id) || []).length > 0)
-        .map(l => `${editMode === 'teacher' ? lessonTeacherId(l) : l.groupId}|${l.subjectId}|${l.day}|${l.period}`)
+        .map(l => `${filter.type === 'teacher' ? lessonTeacherId(l) : l.groupId}|${l.subjectId}|${l.day}|${l.period}`)
     ).size,
-    [visibleGrid, analysis, editMode, lessonTeacherId]
+    [visibleGrid, analysis, filter, lessonTeacherId]
   );
 
   const counts = useMemo(
@@ -372,8 +392,8 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     for (const lesson of activePool) {
       unassignedByRule.set(lesson.ruleId, (unassignedByRule.get(lesson.ruleId) || 0) + 1);
     }
-    const rules = editMode === 'teacher'
-      ? (project.curriculum || []).filter(r => r.teacherId === selectedTeacherId)
+    const rules = filter.type === 'teacher'
+      ? (project.curriculum || []).filter(r => r.teacherId === filter.id)
       : (project.curriculum || []);
     const rows = rules.map(rule => {
       const split = workingSplits.find(s => s.ruleId === rule.id);
@@ -394,7 +414,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     });
     rows.sort((a, b) => a.groupName.localeCompare(b.groupName) || a.subjectName.localeCompare(b.subjectName));
     return rows;
-  }, [project, workingSplits, activeSemester, gridLessons, activePool, getGroupName, getSubject, getTeacherName, editMode, selectedTeacherId]);
+  }, [project, workingSplits, activeSemester, gridLessons, activePool, getGroupName, getSubject, getTeacherName, filter]);
 
   const lessonsBySlot = useMemo(() => {
     const map = new Map<string, Lesson[]>();
@@ -531,17 +551,20 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     const reasons = analysis.byLesson.get(lesson.id) || [];
     const subject = getSubject(lesson.subjectId);
     const conflicted = reasons.length > 0;
+    const locked = lockedKeys.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`);
     return (
       <div
         key={lesson.id}
-        className={`timeline-lesson ${conflicted ? 'conflict' : ''}`}
+        className={`timeline-lesson ${conflicted ? 'conflict' : ''} ${locked ? 'locked' : ''}`}
         draggable
         onDragStart={(e) => handleDragStart(e, lesson.id)}
+        onDoubleClick={() => onToggleLock?.(lesson)}
         style={{ borderLeftColor: subject?.color || undefined }}
-        title={lessonTitle(lesson, reasons)}
+        title={`${lessonTitle(lesson, reasons)}\n${locked ? t('click_to_unlock_lesson') : t('click_to_lock_lesson')}`}
       >
         <span className="timeline-lesson-subject">{subject?.shortName || subject?.name || '?'}</span>
         <span className="timeline-lesson-group">{getGroupName(lesson.groupId)}</span>
+        {locked && <span className="timeline-lesson-lock-badge">{t('locked')}</span>}
         {conflicted && <span className="timeline-lesson-conflict-badge">!</span>}
         <button
           className="timeline-lesson-remove"
@@ -558,26 +581,8 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   return (
     <div className="inline-editor">
       <div className="inline-editor-toolbar">
-        {editMode === 'teacher' ? (
-          <>
-            <label className="editor-class-label">{t('teacher')}:</label>
-            <SearchableSelect
-              className="table-filter"
-              value={selectedTeacherId}
-              onChange={setSelectedTeacherId}
-              options={teachers.map(tc => ({ value: tc.id, label: tc.name || tc.shortName || tc.id }))}
-            />
-          </>
-        ) : (
-          <>
-            <label className="editor-class-label">{t('group')}:</label>
-            <SearchableSelect
-              className="table-filter"
-              value={selectedGroupId}
-              onChange={setSelectedGroupId}
-              options={groups.map(g => ({ value: g.id, label: g.name }))}
-            />
-          </>
+        {filter.type !== 'all' && (
+          <span className="editor-class-label">{t('filtered_by')}: {filterLabel}</span>
         )}
         <button className="export-btn" onClick={() => setCurriculumOpen(true)}>{t('editor_curriculum_distribution')}</button>
         <button className="export-btn" onClick={undo} disabled={historyRef.current.length === 0}>{t('editor_undo')}</button>
@@ -591,7 +596,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
         </span>
       </div>
 
-      <p className="editor-hint">{t(editMode === 'teacher' ? 'editor_hint_teacher' : 'editor_hint')}</p>
+      <p className="editor-hint">{t(filter.type === 'all' ? 'editor_hint' : filter.type === 'teacher' ? 'editor_hint_teacher' : 'editor_hint_filter')}</p>
 
       <div className="inline-editor-body">
         <div className="timeline">
@@ -637,7 +642,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
 
         <div className="checker-zone" onDragOver={(e) => e.preventDefault()} onDrop={handlePoolDrop}>
           <h4 className="checker-zone-title">
-            {t('editor_unassigned')} — {editMode === 'teacher' ? getTeacherName(selectedTeacherId) : getGroupName(selectedGroupId)} ({counts.unassigned})
+            {t('editor_unassigned')} — {filterLabel} ({counts.unassigned})
           </h4>
           <p className="checker-zone-hint">{t('editor_checker_hint')}</p>
           {visiblePool.length === 0 ? (
