@@ -367,6 +367,51 @@ describe('InlineEditor teacher edit mode', () => {
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
     expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
+
+  it('never reassigns the moved lesson to a different teacher when replacing', () => {
+    // The moved pool lesson belongs to t1, whose target slot is busy that day.
+    // Before the fix a substitute (t2) solution could take over; it must not.
+    const project: ProjectState = {
+      version: '1.0.0',
+      school: { id: 's1', name: 'Test School' },
+      academicYears: [],
+      teachers: [
+        { id: 't1', name: 'Anna', subjects: ['subj1'] },
+        { id: 't2', name: 'Bohdan', subjects: ['subj1'] },
+      ],
+      subjects: [{ id: 'subj1', name: 'Math', shortName: 'M' }],
+      rooms: [{ id: 'r1', name: 'Room 1', types: [] }],
+      groups: [{ id: 'g1', name: '5-A', grade: 5, subgroups: [] }],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 2, teacherId: 't1', roomId: 'r1' },
+      ],
+      loadDistribution: [],
+      constraints: [{ id: 'x1', kind: 'TEACHER_BUSY', teacherId: 't1', day: 'Monday', periods: [2] }],
+      generatedSchedule: {
+        schedule: [
+          { id: 'l1', ruleId: 'c1', groupId: 'g1', subjectId: 'subj1', teacherId: 't1', roomId: 'r1', day: 'Monday', period: 1 },
+        ],
+        conflicts: [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 1 }],
+        score: 0.5,
+      },
+    };
+    const onSave = vi.fn();
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={onSave} filter={{ type: 'group', id: 'g1' }} />
+    );
+    const chip = container.querySelector('.checker-chip')!;
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+      clientX: 130,
+      dataTransfer: { getData: vi.fn(() => '') },
+    });
+    fireEvent.click(screen.getByText('editor_apply'));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const grid = (onSave.mock.calls[0][0] as any).schedule;
+    const moved = grid.filter((l: any) => l.ruleId === 'c1');
+    // Both hours of c1 keep teacher t1 - never reassigned to t2.
+    expect(moved.every((l: any) => l.teacherId === 't1')).toBe(true);
+  });
 });
 
 describe('InlineEditor draft lifecycle (view/edit toggle)', () => {

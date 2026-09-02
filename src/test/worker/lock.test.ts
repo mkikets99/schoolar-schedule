@@ -65,6 +65,36 @@ describe('locked lessons in generation', () => {
     expect(locked).toMatchObject({ day: 'Monday', period: 1 });
   });
 
+  it('keeps the locked lesson across a cleared-schedule regeneration (locked rule stays pinned, rest regenerates)', async () => {
+    const groups = [
+      { id: 'g1', name: '1-A', grade: 1, subgroups: [], periodStart: 1, periodEnd: 8, maxDailyLessons: 8 },
+    ];
+    const curriculum: CurriculumRule[] = [
+      { id: 'r0', groupId: 'g1', subjectId: 'subj-1', hoursPerWeek: 2, teacherId: 't1', roomId: undefined },
+      { id: 'r1', groupId: 'g1', subjectId: 'subj-2', hoursPerWeek: 2, teacherId: 't2', roomId: undefined },
+    ];
+    // r0 gets locked at two slots.
+    const locks: LockedLesson[] = [
+      { ruleId: 'r0', day: 'Monday', period: 1 },
+      { ruleId: 'r0', day: 'Tuesday', period: 3 },
+    ];
+
+    // First generation.
+    const result1 = await runSemester(makeProject(groups, curriculum, locks), 'semester1', { attempts: 2 });
+    const locked1 = result1.schedule.filter((l: any) => l.ruleId === 'r0');
+    expect(locked1).toHaveLength(2);
+    expect(locked1.find((l: any) => l.day === 'Monday')?.period).toBe(1);
+    expect(locked1.find((l: any) => l.day === 'Tuesday')?.period).toBe(3);
+
+    // Simulate "clear schedule + regenerate": project still carries the locks,
+    // the schedule is (re)derived entirely from the curriculum again.
+    const result2 = await runSemester(makeProject(groups, curriculum, locks), 'semester1', { attempts: 3 });
+    const locked2 = result2.schedule.filter((l: any) => l.ruleId === 'r0');
+    expect(locked2).toHaveLength(2);
+    expect(locked2.find((l: any) => l.day === 'Monday')?.period).toBe(1);
+    expect(locked2.find((l: any) => l.day === 'Tuesday')?.period).toBe(3);
+  });
+
   it('uses the locked lesson against the rule daily limit (it consumes capacity)', async () => {
     const groups = [
       { id: 'g1', name: '1-A', grade: 1, subgroups: [], periodStart: 1, periodEnd: 8, maxDailyLessons: 8 },

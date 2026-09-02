@@ -275,10 +275,11 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
     const choices = suggestRearrangeChoices(project, baseSchedule, id, { day, period }, activeSemester);
     const movedTeacherId = poolLesson ? lessonTeacherId(poolLesson) : lessonTeacherId(existing!);
 
-    // In teacher filter mode a solution must NOT reassign the lesson to another
-    // teacher - drops that would do so are treated as blocked.
+    // A replacement must only move the block - it never swaps the lesson to a
+    // different (substitute) teacher. Solutions that would reassign the moved
+    // lesson are treated as blocked so the engine only returns block moves.
     const feasible = choices.filter(c => c.feasible &&
-      (filter.type !== 'teacher' || !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId));
+      !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId);
 
     // The rearrange engine (up to 15 swaps deep) could not open the slot, but a
     // manual edit may still place the lesson there - the analyzer flags whatever
