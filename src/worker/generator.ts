@@ -20,11 +20,6 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const BAD_TEACHER_GAP_HOURS = 5; // weekly free hours that turn a teacher "bad"
 const DEFAULT_OPTIMIZE_PASSES = 8; // local-search rounds after greedy placement
 
-function clampInt(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, Math.trunc(value)));
-}
-
 interface LessonStub {
   id: string;
   ruleId: string;
@@ -1103,9 +1098,12 @@ function collectUnassigned(result: ScheduleResult): Map<string, number> {
 export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void, settings?: Partial<GenerateSettings>) {
   // Generate many candidate schedules and keep the one that places the most
   // lessons while producing the tightest teacher free-hour distribution.
-  const attempts = clampInt(settings?.attempts ?? 20, 1, 200);
-  const maxSpillPasses = clampInt(settings?.maxSpillPasses ?? 4, 0, 20);
-  const optimizePasses = clampInt(settings?.optimizePasses ?? DEFAULT_OPTIMIZE_PASSES, 0, 60);
+  // Budgets are configurable and intentionally NOT capped at the top (worker v0.3
+  // spec §22): a user may raise them arbitrarily for deeper/stronger searches. A
+  // floor is kept only to reject nonsensical values, never an upper bound.
+  const attempts = Math.max(1, Math.trunc(settings?.attempts ?? 20) || 1);
+  const maxSpillPasses = Math.max(0, Math.trunc(settings?.maxSpillPasses ?? 4) || 0);
+  const optimizePasses = Math.max(0, Math.trunc(settings?.optimizePasses ?? DEFAULT_OPTIMIZE_PASSES) || 0);
 
   // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
   // the spillover must not move lessons across (respecting the forbid).
@@ -1210,7 +1208,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     // Anytime mode (worker v0.3): keep improving candidates against a marching
     // deadline and always return the best valid result found so far. The number
     // of attempts is not fixed; the loop simply stops when the deadline fires.
-    const budgetMs = clampInt(settings?.generationTimeMs ?? 20000, 250, 600000);
+    const budgetMs = Math.max(250, Math.trunc(settings?.generationTimeMs ?? 20000) || 20000);
     const deadline = Date.now() + budgetMs;
     let attempt = 0;
     let reported = 0;

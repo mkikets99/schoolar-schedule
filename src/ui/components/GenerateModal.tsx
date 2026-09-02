@@ -31,10 +31,10 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
   const submit = () => {
     onGenerate({
       mode,
-      attempts: Math.max(1, Math.min(200, Math.floor(attempts || 1))),
-      generationTimeMs: Math.max(250, Math.min(600000, Math.floor(generationTimeMs || 0))),
-      maxSpillPasses: Math.max(0, Math.min(20, Math.floor(maxSpillPasses || 0))),
-      optimizePasses: Math.max(0, Math.min(60, Math.floor(optimizePasses || 0))),
+      attempts: Math.max(1, Math.floor(attempts || 1)),
+      generationTimeMs: Math.max(250, Math.floor(generationTimeMs || 0)),
+      maxSpillPasses: Math.max(0, Math.floor(maxSpillPasses || 0)),
+      optimizePasses: Math.max(0, Math.floor(optimizePasses || 0)),
     });
   };
 
@@ -82,7 +82,6 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
             <input
               type="number"
               min={1}
-              max={200}
               value={attempts}
               onChange={(e) => setAttempts(Number(e.target.value))}
             />
@@ -95,8 +94,6 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
             <input
               type="number"
               min={250}
-              max={600000}
-              step={250}
               value={generationTimeMs}
               onChange={(e) => setGenerationTimeMs(Number(e.target.value))}
             />
@@ -109,7 +106,6 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
         <input
           type="number"
           min={0}
-          max={20}
           value={maxSpillPasses}
           onChange={(e) => setMaxSpillPasses(Number(e.target.value))}
         />
@@ -119,7 +115,6 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
         <input
           type="number"
           min={0}
-          max={60}
           value={optimizePasses}
           onChange={(e) => setOptimizePasses(Number(e.target.value))}
         />

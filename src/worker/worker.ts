@@ -1,6 +1,6 @@
 import { ProjectState, Lesson } from '../shared/types';
 import { generateSemesterSchedules } from './generator';
-import { suggestRearrange } from './rearrange';
+import { suggestRearrange, suggestRearrangeChoices } from './rearrange';
 
 self.onmessage = (event) => {
   const { type, payload } = event.data;
@@ -26,14 +26,17 @@ self.onmessage = (event) => {
       const lessonId: string = payload?.lessonId;
       const target: { day: string; period: number } = payload?.target ?? {};
       const reassignTeacherId: string | undefined = payload?.teacherId;
-      const suggestion = suggestRearrange(
-        project as ProjectState,
-        schedule,
-        lessonId,
-        target,
-        reassignTeacherId
-      );
-      self.postMessage({ type: 'REARRANGE_RESULT', payload: suggestion });
+      const semester: 'semester1' | 'semester2' | undefined = payload?.semester;
+      // `choices: true` returns every distinct AI resolution (an array); the
+      // default returns the single best suggestion - pick the one matching the
+      // caller's need so the pool job resolves to the expected shape.
+      if (payload?.choices) {
+        const choices = suggestRearrangeChoices(project as ProjectState, schedule, lessonId, target, semester);
+        self.postMessage({ type: 'REARRANGE_RESULT', payload: choices });
+      } else {
+        const suggestion = suggestRearrange(project as ProjectState, schedule, lessonId, target, reassignTeacherId, semester);
+        self.postMessage({ type: 'REARRANGE_RESULT', payload: suggestion });
+      }
       break;
     }
 

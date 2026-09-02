@@ -31,13 +31,15 @@ interface SlotOccupancy {
 const DAY_INDEX = (day: string) => Math.max(0, DAYS.indexOf(day));
 
 /**
- * Default per-call rearrange search node ceiling. This is a *work* budget, not a
- * depth limit: correctness never depends on a fixed rearrangement depth (spec
- * §9). It stops pathological blow-ups on dense boards; a larger budget may be
- * supplied for generation-time auto-resolve, and in right-time mode callers may
- * pass an explicit time-aware node budget.
+ * Default per-call rearrange search node ceiling for *interactive* edit-mode
+ * calls (`suggestRearrange` / `suggestRearrangeChoices`) that have no explicit
+ * budget. This is a *work* budget, not a depth limit: correctness never depends
+ * on a fixed rearrangement depth (spec §9). It only stops pathological blow-ups
+ * on dense boards. Generation-time auto-resolve intentionally treats a missing
+ * budget as *unbounded* (spec §22: `null` means no count limit), so the effective
+ * guard there is the node budget the caller supplies or the time deadline.
  */
-const DEFAULT_NODE_BUDGET = 12000;
+export const DEFAULT_NODE_BUDGET = 12000;
 
 /**
  * A lesson that already lives in the schedule, or a not-yet-placed lesson being
@@ -575,6 +577,8 @@ export function resolveUnplacedPlacement(
   target: { day: string; period: number },
   nodeBudget?: number
 ): RearrangeSuggestion {
-  const choices = resolvePlacement(ctx, schedule, lesson, target, false, nodeBudget ?? DEFAULT_NODE_BUDGET);
+  // Generation-time auto-resolve: a missing budget means "no explicit count
+  // limit" (spec §22) - unbounded search, bounded only by the caller deadline.
+  const choices = resolvePlacement(ctx, schedule, lesson, target, false, nodeBudget ?? Infinity);
   return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }

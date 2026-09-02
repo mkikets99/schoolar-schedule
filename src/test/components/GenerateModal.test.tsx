@@ -34,14 +34,14 @@ describe('GenerateModal', () => {
     expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: 5, maxSpillPasses: 0, optimizePasses: 3, generationTimeMs: 20000 });
   });
 
-  it('clamps out-of-range values', () => {
+  it('applies only lower-bound (floor) clamps and keeps large values (no upper cap)', () => {
     const onGenerate = vi.fn();
     render(<GenerateModal open settings={settings} onClose={() => {}} onGenerate={onGenerate} />);
     fireEvent.change(spinbuttons()[0], { target: { value: '500' } });
     fireEvent.change(spinbuttons()[1], { target: { value: '-3' } });
     fireEvent.change(spinbuttons()[2], { target: { value: '999' } });
     fireEvent.click(screen.getByText('generate'));
-    expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: 200, maxSpillPasses: 0, optimizePasses: 60, generationTimeMs: 20000 });
+    expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: 500, maxSpillPasses: 0, optimizePasses: 999, generationTimeMs: 20000 });
   });
 
   it('resets empty attempts to the minimum of 1', () => {

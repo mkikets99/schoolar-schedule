@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { ProjectManager } from './components/ProjectManager';
@@ -13,6 +13,7 @@ import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
 import { GenerateModal } from './components/GenerateModal';
 import { GenerateSettings } from '../shared/types';
+import { workerPool } from './services/workerPool';
 import { exportProject } from './services/ProjectExportService';
 import { exportScheduleJSON } from './services/ExportService';
 import './index.css';
@@ -26,53 +27,19 @@ function AppContent() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [editorSession, setEditorSession] = useState(0);
-  const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
-    const worker = new Worker(new URL('../worker/worker.ts', import.meta.url), {
-      type: 'module',
+    let mounted = true;
+    workerPool.ready().then(() => {
+      if (!mounted) return;
+      setWorkerVersion(workerPool.getVersion() ?? '');
+      setWorkerBuildVersion('');
+      setWorkerStatus(t('worker_ready'));
     });
-
-    worker.onmessage = (event) => {
-      const { type, payload } = event.data;
-      if (type === 'READY') {
-        setWorkerStatus(t('worker_ready'));
-        setWorkerVersion(payload?.version ?? '');
-        setWorkerBuildVersion(payload?.buildVersion ?? '');
-      } else if (type === 'PROGRESS') {
-        setGenerating(true);
-        const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
-        setProgress(pct);
-        if (payload?.attempt && payload?.attempts) {
-          setWorkerStatus(
-            `${t('generating')} ${payload.attempt}/${payload.attempts} — ${pct}%`
-          );
-        } else {
-          setWorkerStatus(`${t('generating')} ${pct}%`);
-        }
-      } else if (type === 'RESULT') {
-        const attempts = payload?.attempts;
-        const genMode = payload?.mode;
-        if (genMode === 'time') {
-          setWorkerStatus(`${t('schedule_generated')} · ${t('generation_time_short', { ms: payload?.generationTimeMs ?? '' })}`);
-        } else {
-          setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
-        }
-        setGenerating(false);
-        setProgress(null);
-        updateGeneratedSchedules(payload?.schedules);
-        updateGeneratedSplits(payload?.splits);
-        setEditorSession(s => s + 1);
-      }
-    };
-
-    worker.postMessage({ type: 'INIT' });
-    workerRef.current = worker;
-
     return () => {
-      worker.terminate();
+      mounted = false;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!project) return;
@@ -96,23 +63,50 @@ function AppContent() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'school' | 'teachers' | 'subjects' | 'rooms' | 'groups' | 'curriculum' | 'load' | 'schedule' | 'constraints'>('dashboard');
 
   const handleGenerateSchedule = (settingsOverride?: GenerateSettings) => {
-    if (workerRef.current && project) {
-      clearGeneratedSchedule();
-      setWorkerStatus(t('starting_gen'));
-      setGenerating(true);
-      setProgress(0);
-      setTimeout(() => {
-        if (workerRef.current) {
-          workerRef.current.postMessage({
-            type: 'GENERATE_SCHEDULE',
-            payload: {
-              project,
-              settings: settingsOverride ?? generateSettings,
-            },
-          });
+    if (!project) return;
+    clearGeneratedSchedule();
+    setWorkerStatus(t('starting_gen'));
+    setGenerating(true);
+    setProgress(0);
+
+    workerPool
+      .ready()
+      .then(() =>
+        workerPool.run({
+          kind: 'GENERATE_SCHEDULE',
+          payload: { project, settings: settingsOverride ?? generateSettings },
+          onProgress: (payload: any) => {
+            setGenerating(true);
+            const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
+            setProgress(pct);
+            if (payload?.attempt && payload?.attempts) {
+              setWorkerStatus(`${t('generating')} ${payload.attempt}/${payload.attempts} — ${pct}%`);
+            } else {
+              setWorkerStatus(`${t('generating')} ${pct}%`);
+            }
+          },
+        })
+      )
+      .then((payload: any) => {
+        const attempts = payload?.attempts;
+        const genMode = payload?.mode;
+        if (genMode === 'time') {
+          setWorkerStatus(`${t('schedule_generated')} · ${t('generation_time_short', { ms: payload?.generationTimeMs ?? '' })}`);
+        } else {
+          setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
         }
-      }, 50);
-    }
+        setGenerating(false);
+        setProgress(null);
+        updateGeneratedSchedules(payload?.schedules);
+        updateGeneratedSplits(payload?.splits);
+        setEditorSession((s) => s + 1);
+      })
+      .catch((err: unknown) => {
+        console.error('Generation failed:', err);
+        setGenerating(false);
+        setProgress(null);
+        setWorkerStatus(t('worker_ready'));
+      });
   };
 
   const [generateSettings, setGenerateSettings] = useState<GenerateSettings>({ mode: 'runs', attempts: 20, maxSpillPasses: 4, generationTimeMs: 20000 });

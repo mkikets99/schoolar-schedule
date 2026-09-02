@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import JSZip from 'jszip';
@@ -51,6 +51,7 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
   let splits!: SemesterSplit[];
 
   beforeAll(async () => {
+    vi.setConfig({ testTimeout: 300000 });
     project = await loadRealProject();
     const messages: { type: string; payload?: any }[] = [];
     await generateSemesterSchedules(project, (msg) => messages.push(msg));

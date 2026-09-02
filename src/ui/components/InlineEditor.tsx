@@ -3,7 +3,7 @@ import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, ScheduleFilter, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
-import { suggestRearrangeChoices } from '../../worker/rearrange';
+import { workerPool } from '../services/workerPool';
 import { Modal } from './Modal';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -261,7 +261,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
     commit({ grid, pool, poolSource, splits });
   };
 
-  const moveLesson = (id: string, day: string, period: number) => {
+  const moveLesson = async (id: string, day: string, period: number) => {
     const poolLesson = poolLessons.find(l => l.id === id);
     const existing = gridLessons.find(l => l.id === id);
     if (!poolLesson && !existing) return;
@@ -272,7 +272,19 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
       ? gridLessons
       : [...gridLessons, { ...poolLesson!, day, period }];
 
-    const choices = suggestRearrangeChoices(project, baseSchedule, id, { day, period }, activeSemester);
+    // The rearrange search runs on a pooled worker, so it never blocks the UI
+    // and can overlap a long schedule generation on another worker.
+    const choices = (await workerPool.run({
+      kind: 'REARRANGE',
+      payload: {
+        project,
+        schedule: baseSchedule,
+        lessonId: id,
+        target: { day, period },
+        semester: activeSemester,
+        choices: true,
+      },
+    })) as RearrangeSuggestion[];
     const movedTeacherId = poolLesson ? lessonTeacherId(poolLesson) : lessonTeacherId(existing!);
 
     // A replacement must only move the block - it never swaps the lesson to a
@@ -281,9 +293,9 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
     const feasible = choices.filter(c => c.feasible &&
       !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId);
 
-    // The rearrange engine (up to 15 swaps deep) could not open the slot, but a
-    // manual edit may still place the lesson there - the analyzer flags whatever
-    // this breaks on the grid instead of forbidding the insert.
+    // The rearrange engine could not open the slot, but a manual edit may still
+    // place the lesson there - the analyzer flags whatever this breaks on the
+    // grid instead of forbidding the insert.
     if (feasible.length === 0) {
       commitFromMoves(id, day, period, {
         feasible: true,

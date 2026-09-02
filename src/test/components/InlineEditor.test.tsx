@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { InlineEditor } from '../../ui/components/InlineEditor';
 import { ProjectState } from '../../shared/types';
 
@@ -9,6 +9,23 @@ vi.mock('react-i18next', () => ({
     i18n: { language: 'en' },
   }),
 }));
+
+// The editor routes its rearrange search through the shared worker pool. In the
+// jsdom unit-test environment no real Web Workers run, so route REARRANGE jobs
+// straight to the real engine synchronously (resolving the pool promise). This
+// keeps the engine behaviour identical while avoiding worker instantiation.
+vi.mock('../../ui/services/workerPool', async () => {
+  const { suggestRearrangeChoices } = await import('../../worker/rearrange');
+  return {
+    workerPool: {
+      run: vi.fn((job: { kind: string; payload: any }) => {
+        const { project, schedule, lessonId, target, semester } = job.payload;
+        return Promise.resolve(suggestRearrangeChoices(project, schedule, lessonId, target, semester));
+      }),
+    },
+    default: {},
+  };
+});
 
 const makeProject = (): ProjectState => ({
   version: '1.0.0',
@@ -106,7 +123,7 @@ describe('InlineEditor', () => {
     expect(container.querySelectorAll('.checker-chip').length).toBe(1);
   });
 
-  it('moves a pool lesson onto the grid when dragged', () => {
+  it('moves a pool lesson onto the grid when dragged', async () => {
     // Leave Monday/period 1 free: jsdom drop events carry no clientX, so the
     // target slot always resolves to period 1 of the first day row.
     const project: ProjectState = {
@@ -123,22 +140,26 @@ describe('InlineEditor', () => {
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
     const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
-    fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    await act(async () => {
+      fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    });
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
     expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 
-  it('force-inserts a pool lesson when the rearrange engine cannot open the slot', () => {
+  it('force-inserts a pool lesson when the rearrange engine cannot open the slot', async () => {
     const { container } = render(<InlineEditor project={makeProject()} activeSemester="semester1" onSave={vi.fn()} />);
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
     const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
-    fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    await act(async () => {
+      fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    });
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
     expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 
-  it('proposes moving a blocking lesson and applies the change on confirm', () => {
+  it('proposes moving a blocking lesson and applies the change on confirm', async () => {
     // g1 is placed at Monday/2; another class occupies Monday/1 (the jsdom drop
     // target). Placing the missing g1 lesson there must relocate the blocker.
     const project: ProjectState = {
@@ -167,9 +188,11 @@ describe('InlineEditor', () => {
     const { container } = render(<InlineEditor project={project} activeSemester="semester1" onSave={onSave} filter={{ type: 'group', id: 'g1' }} />);
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
-    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
-      clientX: 130,
-      dataTransfer: { getData: vi.fn(() => '') },
+    await act(async () => {
+      fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+        clientX: 130,
+        dataTransfer: { getData: vi.fn(() => '') },
+      });
     });
     expect(screen.getByText('rearrange_confirm_title')).toBeTruthy();
     fireEvent.click(screen.getByText('rearrange_confirm_accept'));
@@ -324,7 +347,7 @@ describe('InlineEditor teacher edit mode', () => {
     expect(container.querySelector('.checker-empty')).toBeTruthy();
   });
 
-  it('force-inserts a pool placement that would otherwise swap the lesson to another teacher', () => {
+  it('force-inserts a pool placement that would otherwise swap the lesson to another teacher', async () => {
     const project: ProjectState = {
       version: '1.0.0',
       school: { id: 's1', name: 'Test School' },
@@ -359,16 +382,18 @@ describe('InlineEditor teacher edit mode', () => {
     );
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
-    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
-      clientX: 130,
-      dataTransfer: { getData: vi.fn(() => '') },
+    await act(async () => {
+      fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+        clientX: 130,
+        dataTransfer: { getData: vi.fn(() => '') },
+      });
     });
     expect(screen.queryByText('rearrange_blocked_title')).toBeNull();
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
     expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 
-  it('never reassigns the moved lesson to a different teacher when replacing', () => {
+  it('never reassigns the moved lesson to a different teacher when replacing', async () => {
     // The moved pool lesson belongs to t1, whose target slot is busy that day.
     // Before the fix a substitute (t2) solution could take over; it must not.
     const project: ProjectState = {
@@ -401,9 +426,11 @@ describe('InlineEditor teacher edit mode', () => {
     );
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
-    fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
-      clientX: 130,
-      dataTransfer: { getData: vi.fn(() => '') },
+    await act(async () => {
+      fireEvent.drop(container.querySelectorAll('.timeline-day')[0] as HTMLElement, {
+        clientX: 130,
+        dataTransfer: { getData: vi.fn(() => '') },
+      });
     });
     fireEvent.click(screen.getByText('editor_apply'));
     expect(onSave).toHaveBeenCalledTimes(1);
@@ -507,7 +534,7 @@ describe('InlineEditor two-semester shared pool', () => {
     expect(container.querySelectorAll('.checker-chip.other-semester').length).toBe(2);
   });
 
-  it('shifts one hour to the edited semester when an other-semester lesson is placed', () => {
+  it('shifts one hour to the edited semester when an other-semester lesson is placed', async () => {
     const onSave = vi.fn();
     const { container } = render(
       <InlineEditor project={makeTwoSemesterProject()} activeSemester="semester1" onSave={onSave} />
@@ -519,7 +546,9 @@ describe('InlineEditor two-semester shared pool', () => {
       left: 0, top: 0, width: 480, height: 50, right: 480, bottom: 50, x: 0, y: 0,
       toJSON: () => ({}),
     });
-    fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    await act(async () => {
+      fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
+    });
 
     expect(container.querySelectorAll('.timeline-lesson').length).toBe(3);
 
