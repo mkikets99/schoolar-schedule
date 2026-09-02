@@ -54,22 +54,22 @@ describe('CSVImportService', () => {
   });
 
   it('imports rooms from CSV', async () => {
-    const csv = 'name,capacity\nRoom 101,30\nLab 1,20\n';
+    const csv = 'name,maxGroups\nRoom 101,2\nLab 1,3\n';
     const rooms = await importRoomsCSV(makeFile(csv));
 
     expect(rooms).toHaveLength(2);
     expect(rooms[0].name).toBe('Room 101');
-    expect(rooms[0].capacity).toBe(30);
+    expect(rooms[0].maxGroups).toBe(2);
     expect(rooms[1].name).toBe('Lab 1');
-    expect(rooms[1].capacity).toBe(20);
+    expect(rooms[1].maxGroups).toBe(3);
   });
 
-  it('imports rooms with default capacity', async () => {
+  it('imports rooms with default max groups', async () => {
     const csv = 'name\nRoom 101\n';
     const rooms = await importRoomsCSV(makeFile(csv));
 
     expect(rooms).toHaveLength(1);
-    expect(rooms[0].capacity).toBe(30);
+    expect(rooms[0].maxGroups).toBe(1);
   });
 
   it('imports groups from CSV', async () => {

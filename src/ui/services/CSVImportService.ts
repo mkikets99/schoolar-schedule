@@ -47,7 +47,7 @@ export const importRoomsCSV = (file: File): Promise<Room[]> => {
         const rooms: Room[] = results.data.map((row: any) => ({
           id: crypto.randomUUID(),
           name: row.name || row.Name || row.number || '',
-          capacity: parseInt(row.capacity || row.Capacity) || 30,
+          maxGroups: parseInt(row.maxGroups || row['max groups'] || row['Max Groups']) || 1,
           types: [],
         })).filter(r => r.name);
         resolve(rooms);

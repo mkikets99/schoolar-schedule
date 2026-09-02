@@ -456,11 +456,11 @@ function makeProject(overrides: Partial<ProjectState> = {}): ProjectState {
       { id: 'subj-info', name: 'Informatics', shortName: 'INFO' },
     ],
     rooms: [
-      { id: 'r1', name: 'Room 1', capacity: 30, types: ['classroom'] },
-      { id: 'r2', name: 'Room 2', capacity: 30, types: ['classroom'] },
-      { id: 'r3', name: 'Room 3', capacity: 30, types: ['classroom'] },
-      { id: 'r4', name: 'Room 4', capacity: 30, types: ['classroom'] },
-      { id: 'r5', name: 'Room 5', capacity: 30, types: ['classroom'] },
+      { id: 'r1', name: 'Room 1', maxGroups: 1, types: ['classroom'] },
+      { id: 'r2', name: 'Room 2', maxGroups: 1, types: ['classroom'] },
+      { id: 'r3', name: 'Room 3', maxGroups: 1, types: ['classroom'] },
+      { id: 'r4', name: 'Room 4', maxGroups: 1, types: ['classroom'] },
+      { id: 'r5', name: 'Room 5', maxGroups: 1, types: ['classroom'] },
     ],
     groups: [{ id: 'g1', name: '10-A', grade: 10, subgroups: [] }],
     curriculum: [],
@@ -675,7 +675,7 @@ describe('Worker scheduling algorithm', () => {
   });
 
   it('generates conflict entries for unassignable lessons', async () => {
-    const rooms = [{ id: 'r1', name: 'Only Room', capacity: 30, types: ['classroom'] }];
+    const rooms = [{ id: 'r1', name: 'Only Room', maxGroups: 1, types: ['classroom'] }];
     const curriculum = Array.from({ length: 40 }, (_, i) => ({
       id: `c${i}`,
       groupId: i < 20 ? 'g1' : 'g2',
@@ -713,7 +713,7 @@ describe('Worker scheduling algorithm', () => {
     const rooms = Array.from({ length: 10 }, (_, i) => ({
       id: `r${i}`,
       name: `Room ${i}`,
-      capacity: 30,
+      maxGroups: 1,
       types: ['classroom'],
     }));
     const curriculum: CurriculumRule[] = [];
@@ -746,9 +746,9 @@ describe('Worker scheduling algorithm', () => {
   it('forces the exact room on a rule and never substitutes another', async () => {
     const project = makeProject({
       rooms: [
-        { id: 'r1', name: 'Lab A', capacity: 18, types: ['computer-lab'] },
-        { id: 'r2', name: 'Lab B', capacity: 18, types: ['computer-lab'] },
-        { id: 'r3', name: 'Classroom', capacity: 30, types: ['classroom'] },
+        { id: 'r1', name: 'Lab A', maxGroups: 1, types: ['computer-lab'] },
+        { id: 'r2', name: 'Lab B', maxGroups: 1, types: ['computer-lab'] },
+        { id: 'r3', name: 'Classroom', maxGroups: 1, types: ['classroom'] },
       ],
       curriculum: [
         { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 8, teacherId: 't1', roomId: 'r1' },
@@ -779,9 +779,9 @@ describe('Worker scheduling algorithm', () => {
     // exist as plausible substitutes, but the worker must never use them.
     const project = makeProject({
       rooms: [
-        { id: 'r1', name: 'Only Lab', capacity: 18, types: ['computer-lab'] },
-        { id: 'r2', name: 'Classroom A', capacity: 30, types: ['classroom'] },
-        { id: 'r3', name: 'Classroom B', capacity: 30, types: ['classroom'] },
+        { id: 'r1', name: 'Only Lab', maxGroups: 1, types: ['computer-lab'] },
+        { id: 'r2', name: 'Classroom A', maxGroups: 1, types: ['classroom'] },
+        { id: 'r3', name: 'Classroom B', maxGroups: 1, types: ['classroom'] },
       ],
       groups: [
         { id: 'g1', name: '10-A', grade: 10, subgroups: [], periodStart: 1, periodEnd: 2, maxDailyLessons: 2 },

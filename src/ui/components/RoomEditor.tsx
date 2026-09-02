@@ -14,7 +14,7 @@ export const RoomEditor = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', capacity: 30 });
+  const [newItem, setNewItem] = useState({ name: '', maxGroups: 1 });
   const [typeFilter, setTypeFilter] = useState('');
 
   const roomTypes = [...new Set(rooms.flatMap(r => r.types))].sort();
@@ -25,7 +25,7 @@ export const RoomEditor = () => {
     getSortValue: (room, key) => {
       switch (key) {
         case 'name': return room.name;
-        case 'capacity': return room.capacity ?? 0;
+        case 'maxGroups': return room.maxGroups ?? 1;
         case 'types': return room.types.join(', ');
         default: return room.name;
       }
@@ -40,12 +40,12 @@ export const RoomEditor = () => {
     const room: Room = {
       id: crypto.randomUUID(),
       name: newItem.name.trim(),
-      capacity: newItem.capacity,
+      maxGroups: newItem.maxGroups,
       types: [],
     };
 
     updateRooms([...rooms, room]);
-    setNewItem({ name: '', capacity: 30 });
+    setNewItem({ name: '', maxGroups: 1 });
     setIsModalOpen(false);
   };
 
@@ -63,7 +63,7 @@ export const RoomEditor = () => {
     const imported: Room[] = data.map((row: any) => ({
       id: crypto.randomUUID(),
       name: row.Name || row.name || row.number || '',
-      capacity: parseInt(row.Capacity || row.capacity) || 30,
+      maxGroups: parseInt(row.maxGroups || row['Max Groups']) || 1,
       types: [],
     })).filter(r => r.name);
 
@@ -108,11 +108,11 @@ export const RoomEditor = () => {
             autoFocus
           />
         </FormField>
-        <FormField label={t('capacity')}>
+        <FormField label={t('max_groups')}>
           <input 
             type="number" 
-            value={newItem.capacity}
-            onChange={(e) => setNewItem({ ...newItem, capacity: parseInt(e.target.value) || 0 })}
+            value={newItem.maxGroups}
+            onChange={(e) => setNewItem({ ...newItem, maxGroups: parseInt(e.target.value) || 1 })}
             min="1"
           />
         </FormField>
@@ -135,7 +135,7 @@ export const RoomEditor = () => {
         <thead>
           <tr>
             <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
-            <SortableTh label={t('capacity_students')} sortKey="capacity" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('max_groups')} sortKey="maxGroups" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('types')} sortKey="types" sort={sort} onSort={toggleSort} />
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
@@ -153,8 +153,8 @@ export const RoomEditor = () => {
               <td>
                 <input 
                   type="number" 
-                  value={item.capacity || ''} 
-                  onChange={(e) => handleUpdate(item.id, { capacity: parseInt(e.target.value) || 0 })}
+                  value={item.maxGroups ?? 1} 
+                  onChange={(e) => handleUpdate(item.id, { maxGroups: parseInt(e.target.value) || 1 })}
                 />
               </td>
               <td>{item.types.join(', ')}</td>

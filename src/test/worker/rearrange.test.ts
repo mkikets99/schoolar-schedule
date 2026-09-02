@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { suggestRearrange, suggestRearrangeChoices } from '../../worker/rearrange';
+import { suggestRearrange, suggestRearrangeChoices, resolveUnplacedPlacement, createRearrangeContext } from '../../worker/rearrange';
 import { Lesson, ProjectState } from '../../shared/types';
 
 const makeLesson = (id: string, over: Partial<Lesson> = {}): Lesson => ({
@@ -309,5 +309,47 @@ describe('suggestRearrange', () => {
     // at least one further relocation (a cascade of colliding lessons).
     expect(s.moves.length).toBeGreaterThan(2);
     expect(s.moves.slice(1).every((m) => m.lessonId !== 'l1')).toBe(true);
+  });
+
+  it('worker v0.3 Test 10: the generation-time path reaches an arbitrary-depth chain (no depth cap)', () => {
+    // `resolveUnplacedPlacement` previously used a depth-1 cap (it could move a
+    // single blocker straight to a free slot, never a cascade). Under v0.3 that
+    // default is gone: the search continues as deep as the lesson count permits,
+    // bounded only by the node budget and cycle prevention. Build a board where
+    // the blocker B itself is blocked on every slot except one whose occupant C
+    // can move to a free slot -> a 2-level chain: B -> C -> free.
+    const project = makeProject({
+      teachers: [
+        { id: 'tA', name: 'A', subjects: ['math'] },
+        { id: 'tB', name: 'B', subjects: ['math'] },
+      ],
+      groups: [
+        { id: 'g1', name: '5-A', grade: 5, subgroups: [], periodStart: 1, periodEnd: 2 },
+        { id: 'g2', name: '5-B', grade: 5, subgroups: [], periodStart: 1, periodEnd: 2 },
+        { id: 'g3', name: '5-C', grade: 5, subgroups: [], periodStart: 1, periodEnd: 2 },
+      ],
+      curriculum: [
+        { id: 'c1', groupId: 'g1', subjectId: 'math', hoursPerWeek: 2, teacherId: 'tA', roomId: 'r1' },
+        { id: 'c2', groupId: 'g2', subjectId: 'math', hoursPerWeek: 6, teacherId: 'tA', roomId: 'r1' },
+        { id: 'c3', groupId: 'g3', subjectId: 'math', hoursPerWeek: 6, teacherId: 'tB', roomId: 'r1' },
+      ],
+    });
+    const l = (id: string, gid: string, cid: string, tid: string, p: number) => ({
+      id, ruleId: cid, groupId: gid, subjectId: 'math', teacherId: tid, roomId: 'r1', day: 'Monday', period: p,
+    });
+    const schedule = [
+      l('l1', 'g1', 'c1', 'tA', 1), // the lesson to place
+      l('B', 'g2', 'c2', 'tA', 2), // blocks l1's target (Monday/2), but B has nowhere to go directly
+      l('C', 'g3', 'c3', 'tB', 1), // occupies the only slot B could reach
+    ];
+    // l1 -> Monday/2 needs B -> Monday/1, which needs C -> Tuesday/1 (free).
+    const ctx = createRearrangeContext(project, 'semester1');
+    const res = resolveUnplacedPlacement(ctx, schedule, { ...l('l1', 'g1', 'c1', 'tA', 1), teacherId: 'tA' }, { day: 'Monday', period: 2 });
+    expect(res.feasible).toBe(true);
+    // Main move, plus the B relocation, plus the C relocation.
+    expect(res.moves.length).toBeGreaterThanOrEqual(2);
+    const displaced = res.moves.slice(1);
+    expect(displaced.some((m) => m.lessonId === 'B')).toBe(true);
+    expect(displaced.some((m) => m.lessonId === 'C')).toBe(true);
   });
 });

@@ -22,13 +22,22 @@ interface BusyRule {
 
 interface SlotOccupancy {
   teacher: Map<string, Set<string>>; // teacherId -> "day|period"
-  room: Map<string, Set<string>>; // roomId -> "day|period"
+  room: Map<string, Map<string, Set<string>>>; // roomId -> "day|period" -> groupIds
   group: Map<string, Set<string>>; // groupId -> "day|period"
   groupDayCount: Map<string, Map<string, number>>; // groupId -> day -> count
   ruleDayCount: Map<string, Map<string, number>>; // ruleId -> day -> count
 }
 
 const DAY_INDEX = (day: string) => Math.max(0, DAYS.indexOf(day));
+
+/**
+ * Default per-call rearrange search node ceiling. This is a *work* budget, not a
+ * depth limit: correctness never depends on a fixed rearrangement depth (spec
+ * §9). It stops pathological blow-ups on dense boards; a larger budget may be
+ * supplied for generation-time auto-resolve, and in right-time mode callers may
+ * pass an explicit time-aware node budget.
+ */
+const DEFAULT_NODE_BUDGET = 12000;
 
 /**
  * A lesson that already lives in the schedule, or a not-yet-placed lesson being
@@ -57,6 +66,7 @@ export interface RearrangeContext {
   slotFree: (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string) => boolean;
   bestFreeSlot: (occ: SlotOccupancy, l: Lesson) => { day: string; period: number } | null;
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
+  roomHasCapacity: (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number) => boolean;
 }
 
 export function createRearrangeContext(project: ProjectState, semester?: 'semester1' | 'semester2'): RearrangeContext {
@@ -72,6 +82,12 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
   const maxDailyByRule = buildMaxDailyByRule(project);
   const groupConfig = new Map((project.groups || []).map((g) => [g.id, computeGroupScheduleConfig(g)]));
   const ruleById = new Map((project.curriculum || []).map((r) => [r.id, r]));
+
+  // How many groups may share a room in the same slot. Undefined defaults to 1.
+  const maxGroupsByRoom = new Map<string, number>();
+  for (const room of project.rooms || []) {
+    maxGroupsByRoom.set(room.id, Math.max(1, room.maxGroups ?? 1));
+  }
 
   // Lessons pinned against movement: identified by rule + slot (semester-scoped
   // when the context knows the semester). The relocation cascade never moves one.
@@ -102,7 +118,11 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
       if (excludeIds.has(l.id)) continue;
       const key = `${l.day}|${l.period}`;
       if (l.teacherId) push(occ.teacher, l.teacherId, key);
-      if (l.roomId) push(occ.room, l.roomId, key);
+      if (l.roomId) {
+        if (!occ.room.has(l.roomId)) occ.room.set(l.roomId, new Map());
+        if (!occ.room.get(l.roomId)!.has(key)) occ.room.get(l.roomId)!.set(key, new Set());
+        occ.room.get(l.roomId)!.get(key)!.add(l.groupId);
+      }
       push(occ.group, l.groupId, key);
       if (!occ.groupDayCount.has(l.groupId)) occ.groupDayCount.set(l.groupId, new Map());
       const gd = occ.groupDayCount.get(l.groupId)!;
@@ -141,6 +161,16 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
         Math.abs(p.period - l.period) === 1
     );
 
+  // True when a room can host another lesson of `groupId` at the slot: either
+  // the room has not yet reached its simultaneous-group cap, or the group is
+  // already in the room there (a split/double partner re-using the room).
+  const roomHasCapacity = (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number): boolean => {
+    const occupants = occ.room.get(roomId)?.get(`${day}|${period}`);
+    if (!occupants) return true;
+    const cap = maxGroupsByRoom.get(roomId) ?? 1;
+    return occupants.has(groupId) || occupants.size < cap;
+  };
+
   const slotFree = (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string): boolean => {
     const cfg = groupConfig.get(l.groupId);
     const start = cfg?.periodStart ?? 1;
@@ -149,7 +179,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     const teacher = teacherId || l.teacherId || mainTeacherIdOf(l);
     if (occ.group.get(l.groupId)?.has(`${day}|${period}`)) return false;
     if (teacher && occ.teacher.get(teacher)?.has(`${day}|${period}`)) return false;
-    if (l.roomId && occ.room.get(l.roomId)?.has(`${day}|${period}`)) return false;
+    if (l.roomId && !roomHasCapacity(occ, l.roomId, l.groupId, day, period)) return false;
     if (teacher && isBusy(teacher, day, period)) return false;
     if (
       period === start &&
@@ -198,6 +228,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     slotFree,
     bestFreeSlot,
     isSplitOrDoublePartner,
+    roomHasCapacity,
   };
 }
 
@@ -207,7 +238,7 @@ function resolvePlacement(
   lesson: PlacableLesson,
   target: { day: string; period: number },
   allowSubstitutes: boolean,
-  maxDepth = 1
+  nodeBudget = DEFAULT_NODE_BUDGET
 ): RearrangeSuggestion[] {
   const {
     noFirstRules,
@@ -217,6 +248,7 @@ function resolvePlacement(
     mainTeacherIdOf,
     buildOccupancy,
     slotFree,
+    roomHasCapacity,
     isSplitOrDoublePartner,
   } = ctx;
   const moveTarget = { day: target.day, period: target.period };
@@ -241,21 +273,23 @@ function resolvePlacement(
   });
 
   // Recursive relocation: move `o` to a valid slot, displacing the colliding
-  // teacher/room occupants when the slot is taken and repeating until either a
-  // free slot is reached or `depth` swaps are consumed. `excluded` carries the
-  // lessons already placed (moved) so a chain never revisits them; `claimed`
-  // reserves the target slots those moves occupy so no two moves end in the same
-  // slot. Returns the move list plus the final excluded set, or null when no
-  // cascade fits.
+  // teacher/room occupants when the slot is taken, and repeat until a free slot
+  // is reached. There is deliberately NO fixed depth cap (worker v0.3 spec §9):
+  // a branch may cascade as deep as the number of distinct lessons because
+  // `excluded` guarantees each lesson is moved at most once per branch. Practical
+  // termination is the shared `nodeBudget` (a work ceiling, not a depth limit)
+  // plus cycle prevention: `excluded` prevents moving the same lesson (and
+  // therefore returning to the same slot) twice inside one search branch (§11).
+  // `claimed` reserves the target slots those moves occupy so no two moves end
+  // in the same slot. Returns the move list plus the final excluded set, or null
+  // when no cascade fits within the budget.
   let searchNodes = 0;
-  const NODE_BUDGET = 12000;
   const relocate = (
     o: Lesson,
     excluded: Set<string>,
-    depth: number,
     claimed: Set<string>
   ): { moves: RearrangeMove[]; excluded: Set<string> } | null => {
-    if (searchNodes > NODE_BUDGET) return null;
+    if (searchNodes > nodeBudget) return null;
     searchNodes++;
     if (ctx.lockedSlots.has(`${o.ruleId}|${o.day}|${o.period}`)) return null;
     const cfgO = groupConfig.get(o.groupId);
@@ -294,7 +328,6 @@ function resolvePlacement(
         claimed.add(`${slot.day}|${slot.period}`);
         return { moves: [{ lessonId: o.id, toDay: slot.day, toPeriod: slot.period }], excluded: next };
       }
-      if (depth <= 0) continue;
       const nextExcluded = new Set(excluded);
       nextExcluded.add(o.id);
       const colliders = schedule.filter(
@@ -303,7 +336,8 @@ function resolvePlacement(
           !nextExcluded.has(c.id) &&
           c.day === slot.day &&
           c.period === slot.period &&
-          ((o.teacherId && c.teacherId === o.teacherId) || (o.roomId && c.roomId === o.roomId))
+          ((o.teacherId && c.teacherId === o.teacherId) ||
+            (o.roomId && c.roomId === o.roomId && !roomHasCapacity(occBase, o.roomId, o.groupId, slot.day, slot.period)))
       );
       if (colliders.length === 0) continue;
       const displaced: RearrangeMove[] = [];
@@ -313,7 +347,7 @@ function resolvePlacement(
           ok = false;
           break;
         }
-        const sub = relocate(c, nextExcluded, depth - 1, claimed);
+        const sub = relocate(c, nextExcluded, claimed);
         if (!sub) {
           ok = false;
           break;
@@ -336,15 +370,15 @@ function resolvePlacement(
 
   // Build a complete suggestion given an ordered list of extra lessons that are
   // moved away first (teacher/room blockers, daily-cap victims). Returns null if
-  // any extra lesson cannot be relocated (via a cascade up to `depth` swaps) or
-  // the target still isn't free.
-  const buildSuggestion = (teacherId: string, extraLessons: Lesson[], depth: number): RearrangeSuggestion | null => {
+  // any extra lesson cannot be relocated (via a cascade within the node budget)
+  // or the target still isn't free.
+  const buildSuggestion = (teacherId: string, extraLessons: Lesson[]): RearrangeSuggestion | null => {
     const excluded = new Set<string>([lesson.id]);
     const claimed = new Set<string>([`${moveTarget.day}|${moveTarget.period}`]);
     const extras: RearrangeMove[] = [];
     for (const o of extraLessons) {
       if (isSplitOrDoublePartner(schedule, o)) return null;
-      const res = relocate(o, excluded, depth, claimed);
+      const res = relocate(o, excluded, claimed);
       if (!res) return null;
       extras.push(...res.moves);
       res.excluded.forEach((id) => excluded.add(id));
@@ -374,10 +408,11 @@ function resolvePlacement(
           o.id !== lesson.id &&
           o.day === moveTarget.day &&
           o.period === moveTarget.period &&
-          ((teacherId && o.teacherId === teacherId) || (lesson.roomId && o.roomId === lesson.roomId))
+          ((teacherId && o.teacherId === teacherId) ||
+            (lesson.roomId && o.roomId === lesson.roomId && !roomHasCapacity(occ0, lesson.roomId, lesson.groupId, moveTarget.day, moveTarget.period)))
       );
       for (const blocker of blockers) {
-        const sol = buildSuggestion(teacherId, [blocker], maxDepth);
+        const sol = buildSuggestion(teacherId, [blocker]);
         if (sol) out.push(sol);
       }
 
@@ -391,7 +426,7 @@ function resolvePlacement(
             (o) => o.ruleId === lesson.ruleId && o.day === moveTarget.day && o.id !== lesson.id
           );
           for (const victim of victims) {
-            const sol = buildSuggestion(teacherId, [victim], maxDepth);
+            const sol = buildSuggestion(teacherId, [victim]);
             if (sol) out.push(sol);
           }
         }
@@ -452,7 +487,8 @@ function resolvePlacement(
         o.id !== lesson.id &&
         o.day === moveTarget.day &&
         o.period === moveTarget.period &&
-        ((originalTeacher && o.teacherId === originalTeacher) || (lesson.roomId && o.roomId === lesson.roomId)) &&
+        ((originalTeacher && o.teacherId === originalTeacher) ||
+          (lesson.roomId && o.roomId === lesson.roomId && !roomHasCapacity(occC, lesson.roomId, lesson.groupId, moveTarget.day, moveTarget.period))) &&
         isSplitOrDoublePartner(schedule, o)
     );
     if (hasSplit) reason = 'SPLIT_PARTNER';
@@ -480,7 +516,7 @@ export function suggestRearrangeChoices(
 ): RearrangeSuggestion[] {
   const lesson = schedule.find((l) => l.id === lessonId);
   if (!lesson) return [{ feasible: false, moves: [], reason: 'NO_SPACE' }];
-  return resolvePlacement(createRearrangeContext(project, semester), schedule, lesson, target, true, 15);
+  return resolvePlacement(createRearrangeContext(project, semester), schedule, lesson, target, true, DEFAULT_NODE_BUDGET);
 }
 
 /**
@@ -496,8 +532,9 @@ export function suggestRearrangeChoices(
  *  2. relocate the lesson with an eligible substitute teacher (fixes a teacher
  *     busy/collision without touching any other lesson when the room is free),
  *  3. relocate the blocking / daily-cap lessons to free slots so the target
- *     opens up; relocations may themselves displace occupants, cascading up to
- *     15 swaps deep before the engine reports the move as infeasible.
+ *     opens up; relocations may themselves displace occupants in an arbitrary-
+ *     depth cascade bounded by the node budget. Rearrangement depth is never a
+ *     correctness limit or a measure of quality (spec §9/§33).
  */
 export function suggestRearrange(
   project: ProjectState,
@@ -518,7 +555,7 @@ export function suggestRearrange(
     lesson,
     target,
     !reassignTeacherId,
-    15
+    DEFAULT_NODE_BUDGET
   );
   return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }
@@ -535,8 +572,9 @@ export function resolveUnplacedPlacement(
   ctx: RearrangeContext,
   schedule: Lesson[],
   lesson: PlacableLesson,
-  target: { day: string; period: number }
+  target: { day: string; period: number },
+  nodeBudget?: number
 ): RearrangeSuggestion {
-  const choices = resolvePlacement(ctx, schedule, lesson, target, false);
+  const choices = resolvePlacement(ctx, schedule, lesson, target, false, nodeBudget ?? DEFAULT_NODE_BUDGET);
   return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }

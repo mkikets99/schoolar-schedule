@@ -31,7 +31,7 @@ describe('GenerateModal', () => {
     fireEvent.change(spinbuttons()[1], { target: { value: '0' } });
     fireEvent.change(spinbuttons()[2], { target: { value: '3' } });
     fireEvent.click(screen.getByText('generate'));
-    expect(onGenerate).toHaveBeenCalledWith({ attempts: 5, maxSpillPasses: 0, optimizePasses: 3 });
+    expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: 5, maxSpillPasses: 0, optimizePasses: 3, generationTimeMs: 20000 });
   });
 
   it('clamps out-of-range values', () => {
@@ -41,7 +41,7 @@ describe('GenerateModal', () => {
     fireEvent.change(spinbuttons()[1], { target: { value: '-3' } });
     fireEvent.change(spinbuttons()[2], { target: { value: '999' } });
     fireEvent.click(screen.getByText('generate'));
-    expect(onGenerate).toHaveBeenCalledWith({ attempts: 200, maxSpillPasses: 0, optimizePasses: 60 });
+    expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: 200, maxSpillPasses: 0, optimizePasses: 60, generationTimeMs: 20000 });
   });
 
   it('resets empty attempts to the minimum of 1', () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal, FormField } from './Modal';
-import { GenerateSettings } from '../../shared/types';
+import { GenerateSettings, GenerationMode } from '../../shared/types';
 
 interface GenerateModalProps {
   open: boolean;
@@ -12,13 +12,17 @@ interface GenerateModalProps {
 
 export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateModalProps) => {
   const { t } = useTranslation();
+  const [mode, setMode] = useState<GenerationMode>(settings.mode ?? 'runs');
   const [attempts, setAttempts] = useState(settings.attempts);
+  const [generationTimeMs, setGenerationTimeMs] = useState(settings.generationTimeMs ?? 20000);
   const [maxSpillPasses, setMaxSpillPasses] = useState(settings.maxSpillPasses);
   const [optimizePasses, setOptimizePasses] = useState(settings.optimizePasses ?? 8);
 
   useEffect(() => {
     if (open) {
+      setMode(settings.mode ?? 'runs');
       setAttempts(settings.attempts);
+      setGenerationTimeMs(settings.generationTimeMs ?? 20000);
       setMaxSpillPasses(settings.maxSpillPasses);
       setOptimizePasses(settings.optimizePasses ?? 8);
     }
@@ -26,7 +30,9 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
 
   const submit = () => {
     onGenerate({
+      mode,
       attempts: Math.max(1, Math.min(200, Math.floor(attempts || 1))),
+      generationTimeMs: Math.max(250, Math.min(600000, Math.floor(generationTimeMs || 0))),
       maxSpillPasses: Math.max(0, Math.min(20, Math.floor(maxSpillPasses || 0))),
       optimizePasses: Math.max(0, Math.min(60, Math.floor(optimizePasses || 0))),
     });
@@ -45,16 +51,60 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
       }
     >
       <p className="section-desc">{t('generate_settings_hint')}</p>
-      <FormField label={t('generate_attempts')}>
-        <input
-          type="number"
-          min={1}
-          max={200}
-          value={attempts}
-          onChange={(e) => setAttempts(Number(e.target.value))}
-        />
+
+      <FormField label={t('generate_mode')}>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <input
+              type="radio"
+              name="gen-mode"
+              checked={mode === 'runs'}
+              onChange={() => setMode('runs')}
+            />
+            {t('generate_mode_runs')}
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <input
+              type="radio"
+              name="gen-mode"
+              checked={mode === 'time'}
+              onChange={() => setMode('time')}
+            />
+            {t('generate_mode_time')}
+          </label>
+        </div>
       </FormField>
-      <p className="form-hint">{t('generate_attempts_hint')}</p>
+      <p className="form-hint">{t('generate_mode_hint')}</p>
+
+      {mode === 'runs' ? (
+        <>
+          <FormField label={t('generate_attempts')}>
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={attempts}
+              onChange={(e) => setAttempts(Number(e.target.value))}
+            />
+          </FormField>
+          <p className="form-hint">{t('generate_attempts_hint')}</p>
+        </>
+      ) : (
+        <>
+          <FormField label={t('generate_time_ms')}>
+            <input
+              type="number"
+              min={250}
+              max={600000}
+              step={250}
+              value={generationTimeMs}
+              onChange={(e) => setGenerationTimeMs(Number(e.target.value))}
+            />
+          </FormField>
+          <p className="form-hint">{t('generate_time_ms_hint')}</p>
+        </>
+      )}
+
       <FormField label={t('generate_max_spill_passes')}>
         <input
           type="number"

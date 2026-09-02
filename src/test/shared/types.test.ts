@@ -15,7 +15,7 @@ const baseProject: ProjectState = {
   academicYears: [{ id: 'ay1', name: '2024/2025', startDate: '2024-09-01', endDate: '2025-06-30' }],
   teachers: [{ id: 't1', name: 'Alice', shortName: 'A.', subjects: ['s1'] }],
   subjects: [{ id: 's1', name: 'Math', shortName: 'M', color: '#FF0000' }],
-  rooms: [{ id: 'r1', name: 'Room 101', capacity: 30, types: ['classroom'] }],
+  rooms: [{ id: 'r1', name: 'Room 101', maxGroups: 1, types: ['classroom'] }],
   groups: [{ id: 'g1', name: '10-A', grade: 10, subgroups: ['g1-a', 'g1-b'] }],
   curriculum: [{ id: 'c1', groupId: 'g1', subjectId: 's1', hoursPerWeek: 5, teacherId: 't1', roomId: 'r1' }],
   loadDistribution: [{ teacherId: 't1', subjectId: 's1', groupId: 'g1', hours: 5 }],
@@ -76,7 +76,7 @@ describe('ProjectState structure', () => {
   });
 
   it('requires types array on Room even if empty', () => {
-    const r: Room = { id: 'r2', name: 'Lab', capacity: 20, types: [] };
+    const r: Room = { id: 'r2', name: 'Lab', maxGroups: 2, types: [] };
     expect(r.types).toEqual([]);
   });
 

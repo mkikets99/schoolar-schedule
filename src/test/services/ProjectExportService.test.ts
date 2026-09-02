@@ -12,7 +12,7 @@ const createMockProject = (): ProjectState => ({
   academicYears: [{ id: 'ay1', name: '2024/25', startDate: '2024-09-01', endDate: '2025-06-30' }],
   teachers: [{ id: 't1', name: 'Alice', subjects: ['subj1'] }],
   subjects: [{ id: 'subj1', name: 'Math', shortName: 'M' }],
-  rooms: [{ id: 'r1', name: 'Room 101', capacity: 30, types: ['classroom'] }],
+  rooms: [{ id: 'r1', name: 'Room 101', maxGroups: 1, types: ['classroom'] }],
   groups: [{ id: 'g1', name: '10-A', grade: 10, subgroups: [] }],
   curriculum: [{ id: 'c1', groupId: 'g1', subjectId: 'subj1', hoursPerWeek: 5, teacherId: 't1', roomId: 'r1' }],
   loadDistribution: [{ teacherId: 't1', subjectId: 'subj1', groupId: 'g1', hours: 5 }],

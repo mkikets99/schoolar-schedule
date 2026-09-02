@@ -1,5 +1,6 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson, ScheduleScore } from '../shared/types';
 import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
+import { buildScheduleScore, compareScores, scoreVectorToNumber } from './score';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -16,9 +17,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 // a forced solution).
 // ---------------------------------------------------------------------------
 
-const GAP_HOUR_PENALTY = 10; // per free hour, in score units
 const BAD_TEACHER_GAP_HOURS = 5; // weekly free hours that turn a teacher "bad"
-const BAD_TEACHER_PENALTY = 500; // per bad teacher
 const DEFAULT_OPTIMIZE_PASSES = 8; // local-search rounds after greedy placement
 
 function clampInt(value: number, min: number, max: number): number {
@@ -67,12 +66,6 @@ function shuffleInPlace<T>(arr: T[], rng: () => number): void {
   }
 }
 
-function countUnassigned(result: ScheduleResult): number {
-  return (result.conflicts || [])
-    .filter((c) => c?.type === 'UNASSIGNED_HOURS')
-    .reduce((sum, c) => sum + (c.missing ?? 1), 0);
-}
-
 // ---------------------------------------------------------------------------
 // Post-placement auto-resolve: reuse the rearrange engine at generation time to
 // recover lessons the greedy pass left unassigned. A lesson whose every direct
@@ -96,7 +89,8 @@ function tryPlaceUnassignedOne(
   schedule: any[],
   rule: CurriculumRule,
   start: number,
-  end: number
+  end: number,
+  nodeBudget?: number
 ): boolean {
   for (const day of DAYS) {
     for (let period = start; period <= end; period++) {
@@ -113,7 +107,8 @@ function tryPlaceUnassignedOne(
           day: 'Monday',
           period: 1,
         },
-        { day, period }
+        { day, period },
+        nodeBudget
       );
       if (!suggestion.feasible || suggestion.moves.length === 0) continue;
       const main = suggestion.moves[0];
@@ -140,7 +135,7 @@ function tryPlaceUnassignedOne(
  * list is rewritten in place, `missing` reduced by one per recovered lesson.
  * A no-op when there is nothing to resolve.
  */
-export function autoResolveUnassigned(project: ProjectState, schedule: any[], conflicts: any[]): void {
+export function autoResolveUnassigned(project: ProjectState, schedule: any[], conflicts: any[], nodeBudget?: number): void {
   if (!(conflicts || []).some((c) => c?.type === 'UNASSIGNED_HOURS')) return;
 
   const ctx = createRearrangeContext(project);
@@ -169,7 +164,7 @@ export function autoResolveUnassigned(project: ProjectState, schedule: any[], co
     let guard = 0;
     while (missing > 0 && guard < 25) {
       guard++;
-      if (!tryPlaceUnassignedOne(ctx, schedule, rule, window.start, window.end)) break;
+      if (!tryPlaceUnassignedOne(ctx, schedule, rule, window.start, window.end, nodeBudget)) break;
       missing--;
     }
     if (missing > 0) kept.push({ ...conflict, missing });
@@ -216,30 +211,6 @@ function extraPeriodsGapDelta(schedule: any[], teacherId: string, day: string, e
   return gapOfPeriods(merged) - gapOfPeriods(current);
 }
 
-interface GapStats {
-  totalGapHours: number;
-  badTeachers: number;
-}
-
-function combinedGapStats(schedules: SemesterSchedules): GapStats {
-  const teacherIds = new Set<string>();
-  for (const semester of [schedules.semester1.schedule, schedules.semester2.schedule]) {
-    for (const lesson of semester) {
-      if (lesson.teacherId) teacherIds.add(lesson.teacherId);
-    }
-  }
-  let totalGapHours = 0;
-  let badTeachers = 0;
-  for (const teacherId of teacherIds) {
-    const week1 = teacherWeekGap(schedules.semester1.schedule, teacherId);
-    const week2 = teacherWeekGap(schedules.semester2.schedule, teacherId);
-    totalGapHours += week1 + week2;
-    if (week1 > BAD_TEACHER_GAP_HOURS) badTeachers++;
-    if (week2 > BAD_TEACHER_GAP_HOURS) badTeachers++;
-  }
-  return { totalGapHours, badTeachers };
-}
-
 function teacherGapReport(schedule: any[]): { totalGapHours: number; badTeachers: string[]; teachers: { id: string; weekGap: number }[] } {
   const ids = [...new Set(schedule.map((l) => l.teacherId).filter(Boolean))];
   const teachers = ids
@@ -250,122 +221,27 @@ function teacherGapReport(schedule: any[]): { totalGapHours: number; badTeachers
   return { totalGapHours, badTeachers, teachers };
 }
 
-// Intended per-semester lesson load per teacher and per group. When an explicit
-// loadDistribution input exists it is used (hours are treated as the annual weekly
-// target, so each semester gets half); otherwise the curriculum splits are summed.
-function intendedLoads(
+/**
+ * Build the canonical lexicographic score vector for a candidate. Selection uses
+ * {@link compareScores}; this also exposes the vector for tests/UI.
+ */
+export function buildScore(
+  schedules: SemesterSchedules,
+  splits: SemesterSplit[],
   project: ProjectState,
-  splits: SemesterSplit[]
-): { teacher: Map<string, { s1: number; s2: number }>; group: Map<string, { s1: number; s2: number }> } {
-  const teacher = new Map<string, { s1: number; s2: number }>();
-  const group = new Map<string, { s1: number; s2: number }>();
-  const add = (m: Map<string, { s1: number; s2: number }>, id: string, first: number, second: number) => {
-    const cur = m.get(id) || { s1: 0, s2: 0 };
-    cur.s1 += first;
-    cur.s2 += second;
-    m.set(id, cur);
-  };
-
-  const ld = project.loadDistribution || [];
-  if (ld.length > 0) {
-    for (const l of ld) {
-      const half = l.hours / 2;
-      if (l.teacherId) add(teacher, l.teacherId, half, half);
-      if (l.groupId) add(group, l.groupId, half, half);
-    }
-  } else {
-    const splitMap = new Map(splits.map((s) => [s.ruleId, s]));
-    for (const rule of project.curriculum) {
-      const split = splitMap.get(rule.id);
-      if (!split) continue;
-      if (rule.teacherId) add(teacher, rule.teacherId, split.first, split.second);
-      add(group, rule.groupId, split.first, split.second);
-    }
-  }
-  return { teacher, group };
+  pinnedRuleIds?: Set<string>
+): ScheduleScore {
+  return buildScheduleScore(schedules, splits, project, pinnedRuleIds);
 }
 
-// Higher is better. The winner is the schedule that resolves the most lessons
-// raw count of placed lessons; percentage is never used for selection. Free-hour
-// compactness is the next big objective: every free hour of a teacher subtracts
-// GAP_HOUR_PENALTY, and any teacher with more than BAD_TEACHER_GAP_HOURS weekly
-// free hours adds a heavy BAD_TEACHER_PENALTY unless it is a forced solution (no
-// placement-complete alternative exists). Load distribution quality only breaks
-// ties between equally complete, equally compact schedules. Pinned FORBID_LESSON
-// rules that still miss hours are penalized hard so the chosen attempt
-// prioritizes the pinned load.
+/**
+ * Scalar projection of the lexicographic vector, retained for display
+ * (`bestQuality`) and the existing numeric-assertion tests. The ordering of this
+ * scalar matches `compareScores` for the completeness-then-gap cases the engine
+ * reports, but the canonical decision rule is always {@link compareScores}.
+ */
 export function scoreAttempt(schedules: SemesterSchedules, splits: SemesterSplit[], project: ProjectState, pinnedRuleIds?: Set<string>): number {
-  const unassigned = countUnassigned(schedules.semester1) + countUnassigned(schedules.semester2);
-  // The winner is chosen by the raw amount of unresolved lessons (the complement
-  // of the placed lesson count), never by a placement percentage: a schedule that
-  // resolves 190 of 200 lessons beats one that resolves 95 of 100 even though
-  // both are 95%. The per-semester `score` ratio is still reported for display.
-  const resolved = schedules.semester1.schedule.length + schedules.semester2.schedule.length;
-  const pinnedUnassigned = (schedules.semester1.conflicts || [])
-    .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
-    .reduce((sum, c) => sum + (c.missing ?? 1), 0)
-    + (schedules.semester2.conflicts || [])
-      .filter((c) => c.type === 'UNASSIGNED_HOURS' && c.ruleId && pinnedRuleIds?.has(c.ruleId))
-      .reduce((sum, c) => sum + (c.missing ?? 1), 0);
-
-  const gap = combinedGapStats(schedules);
-
-  const byTeacherDay = new Map<string, Map<string, number[]>>();
-  for (const sem of [schedules.semester1.schedule, schedules.semester2.schedule]) {
-    for (const lesson of sem as any[]) {
-      if (!lesson.teacherId) continue;
-      if (!byTeacherDay.has(lesson.teacherId)) byTeacherDay.set(lesson.teacherId, new Map());
-      const dmap = byTeacherDay.get(lesson.teacherId)!;
-      if (!dmap.has(lesson.day)) dmap.set(lesson.day, []);
-      dmap.get(lesson.day)!.push(lesson.period);
-    }
-  }
-  // Small reward for leaving teachers with spread-out-but-gap-free days; this is a
-  // residual preference, the gap penalties above already do the heavy lifting.
-  let distribution = 0;
-  for (const dmap of byTeacherDay.values()) {
-    for (const periods of dmap.values()) {
-      periods.sort((a, b) => a - b);
-      if (periods.length === 1) distribution -= 2;
-    }
-  }
-
-  // Penalize deviation between the intended load distribution and the lessons that
-  // were actually placed; only breaks ties between otherwise-equal schedules.
-  const intended = intendedLoads(project, splits);
-  const actualTeacher = new Map<string, { s1: number; s2: number }>();
-  const actualGroup = new Map<string, { s1: number; s2: number }>();
-  const tally = (sem: any[], isSem1: boolean) => {
-    for (const lesson of sem) {
-      if (lesson.teacherId) {
-        const t = actualTeacher.get(lesson.teacherId) || { s1: 0, s2: 0 };
-        if (isSem1) t.s1++; else t.s2++;
-        actualTeacher.set(lesson.teacherId, t);
-      }
-      const g = actualGroup.get(lesson.groupId) || { s1: 0, s2: 0 };
-      if (isSem1) g.s1++; else g.s2++;
-      actualGroup.set(lesson.groupId, g);
-    }
-  };
-  tally(schedules.semester1.schedule as any[], true);
-  tally(schedules.semester2.schedule as any[], false);
-  let deviation = 0;
-  for (const [id, t] of intended.teacher) {
-    const a = actualTeacher.get(id) || { s1: 0, s2: 0 };
-    deviation += Math.abs(t.s1 - a.s1) + Math.abs(t.s2 - a.s2);
-  }
-  for (const [id, g] of intended.group) {
-    const a = actualGroup.get(id) || { s1: 0, s2: 0 };
-    deviation += Math.abs(g.s1 - a.s1) + Math.abs(g.s2 - a.s2);
-  }
-
-  return resolved * 1000
-    - unassigned
-    - pinnedUnassigned * 500
-    - gap.totalGapHours * GAP_HOUR_PENALTY
-    - gap.badTeachers * BAD_TEACHER_PENALTY
-    + distribution * 0.01
-    - deviation * 0.01;
+  return scoreVectorToNumber(buildScheduleScore(schedules, splits, project, pinnedRuleIds));
 }
 
 export async function generateSchedule(project: ProjectState, emit: (msg: WorkerMessage) => void) {
@@ -381,7 +257,8 @@ async function runGenerate(
   emit: (msg: WorkerMessage) => void,
   rng?: () => number,
   pinnedRuleIds?: Set<string>,
-  optimizePasses = DEFAULT_OPTIMIZE_PASSES
+  optimizePasses = DEFAULT_OPTIMIZE_PASSES,
+  nodeBudget?: number
 ): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = DAYS;
 
@@ -423,9 +300,18 @@ async function runGenerate(
     lockedSlotsByRule.get(lock.ruleId)!.add(`${lock.day}-${lock.period}`);
   }
 
+  // A room may host several groups in the same slot simultaneously (e.g. PE in
+  // a gymnasium). maxGroups defaults to 1 when unset, matching the historical
+  // strict one-group-per-room-per-slot behaviour.
+  const maxGroupsByRoom = new Map<string, number>();
+  for (const room of project.rooms || []) {
+    maxGroupsByRoom.set(room.id, Math.max(1, room.maxGroups ?? 1));
+  }
+
   const teacherBusy = new Set<string>();
   const groupBusy = new Set<string>();
-  const roomBusy = new Set<string>();
+  // roomId-slotKey -> set of groupIds currently in that room at that slot.
+  const roomBusy = new Map<string, Set<string>>();
 
   const splitKeys = new Set<string>();
   const seen = new Map<string, CurriculumRule[]>();
@@ -638,9 +524,16 @@ async function runGenerate(
       const counts = ruleDailyCounts.get(lesson.ruleId)!;
       if (counts[di] >= cap) return false;
     }
-    // A room assigned to a rule is forced: if it is taken at this slot the
-    // placement must look elsewhere - never silently substitute another room.
-    if (lesson.roomId && roomBusy.has(`${lesson.roomId}-${slotKey}`)) return false;
+    // A room assigned to a rule is forced: only a room that has already reached
+    // its simultaneous-group cap (maxGroups) in this slot rejects the placement
+    // - never silently substitute another room. The same group re-entering a
+    // room it already occupies (a split partner) is always allowed.
+    if (lesson.roomId) {
+      const occupants = roomBusy.get(`${lesson.roomId}-${slotKey}`);
+      if (occupants && occupants.size >= (maxGroupsByRoom.get(lesson.roomId) ?? 1) && !occupants.has(lesson.groupId)) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -663,7 +556,11 @@ async function runGenerate(
     const firstInSlot = !groupBusy.has(groupSlotKey);
     groupBusy.add(groupSlotKey);
     if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
-    if (roomId) roomBusy.add(`${roomId}-${slotKey}`);
+    if (roomId) {
+      const rk = `${roomId}-${slotKey}`;
+      if (!roomBusy.has(rk)) roomBusy.set(rk, new Set());
+      roomBusy.get(rk)!.add(lesson.groupId);
+    }
 
     const di = days.indexOf(day);
     if (di >= 0) {
@@ -923,9 +820,9 @@ async function runGenerate(
     }
   }
 
-  autoResolveUnassigned(project, schedule, conflicts);
+  autoResolveUnassigned(project, schedule, conflicts, nodeBudget);
 
-  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, rng, optimizePasses, lockedSlots);
+  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, rng, optimizePasses, lockedSlots);
 
   const totalBatches = units.length;
   return {
@@ -949,15 +846,18 @@ function slotFreeForSwap(
   excludeId: string,
   teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
   noFirstRules: { subjectId: string; groupId?: string }[],
-  groupConfig: Map<string, GroupScheduleConfig>
+  groupConfig: Map<string, GroupScheduleConfig>,
+  maxGroupsByRoom: Map<string, number>
 ): boolean {
+  const roomOccupants = new Set<string>();
   for (const other of schedule) {
     if (other.id === excludeId) continue;
     if (other.day !== day || other.period !== period) continue;
     if (other.groupId === lesson.groupId) return false;
     if (lesson.teacherId && other.teacherId === lesson.teacherId) return false;
-    if (lesson.roomId && other.roomId === lesson.roomId) return false;
+    if (lesson.roomId && other.roomId === lesson.roomId) roomOccupants.add(other.groupId);
   }
+  if (lesson.roomId && roomOccupants.size >= (maxGroupsByRoom.get(lesson.roomId) ?? 1)) return false;
   if (lesson.teacherId && isBusyRule(teacherBusyRules, lesson.teacherId, day, period)) return false;
   const cfg = groupConfig.get(lesson.groupId);
   if (cfg) {
@@ -1004,14 +904,15 @@ function canSameDaySwap(
   b: any,
   teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
   noFirstRules: { subjectId: string; groupId?: string }[],
-  groupConfig: Map<string, GroupScheduleConfig>
+  groupConfig: Map<string, GroupScheduleConfig>,
+  maxGroupsByRoom: Map<string, number>
 ): boolean {
   if (a.day !== b.day || a.period === b.period) return false;
   if (hasDoublePartner(schedule, a) || hasDoublePartner(schedule, b)) return false;
   if (hasSplitPartner(schedule, a) || hasSplitPartner(schedule, b)) return false;
   // a -> b's slot, b -> a's slot (same day, group/room/teacher slots checked).
-  if (!slotFreeForSwap(schedule, a, a.day, b.period, b.id, teacherBusyRules, noFirstRules, groupConfig)) return false;
-  if (!slotFreeForSwap(schedule, b, a.day, a.period, a.id, teacherBusyRules, noFirstRules, groupConfig)) return false;
+  if (!slotFreeForSwap(schedule, a, a.day, b.period, b.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) return false;
+  if (!slotFreeForSwap(schedule, b, a.day, a.period, a.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) return false;
   return true;
 }
 
@@ -1033,6 +934,7 @@ function optimizeGaps(
   teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
   noFirstRules: { subjectId: string; groupId?: string }[],
   groupConfig: Map<string, GroupScheduleConfig>,
+  maxGroupsByRoom: Map<string, number>,
   rng: (() => number) | undefined,
   maxPasses: number,
   lockedSlots: Set<string> = new Set()
@@ -1079,7 +981,7 @@ function optimizeGaps(
           if (!bLesson || bLesson.teacherId === entry.tid || isLocked(bLesson)) continue;
           for (const target of [pPrev, pCur]) {
             const aLesson = schedule.find(l => l.teacherId === entry.tid && l.day === entry.day && l.period === target);
-            if (!aLesson || isLocked(aLesson) || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig)) continue;
+            if (!aLesson || isLocked(aLesson) || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) continue;
             const delta = swapGapDelta(schedule, aLesson, bLesson);
             if (bestSwap === null || delta < bestSwap.delta) {
               bestSwap = { a: aLesson, b: bLesson, delta };
@@ -1231,7 +1133,7 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
           const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
           emit({ type: 'PROGRESS', payload: { progress: Math.round(progressBase + (p / 100) * progressSpan) } });
         }
-      }, rng, fixedRules, optimizePasses);
+      }, rng, fixedRules, optimizePasses, maxRearrangeNodes);
     };
 
     let splits = computeSemesterSplits(project);
@@ -1280,16 +1182,77 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
     return { schedules: { semester1, semester2 } as SemesterSchedules, splits };
   }
 
-  let best: { schedules: SemesterSchedules; splits: SemesterSplit[]; quality: number } | null = null;
+  const mode: 'runs' | 'time' = settings?.mode ?? 'runs';
+  const maxRearrangeNodes = settings?.maxRearrangeNodes;
 
+  // Best-known state plus its canonical score for lexicographic comparison.
+  let best: {
+    schedules: SemesterSchedules;
+    splits: SemesterSplit[];
+    quality: number;
+    score: ScheduleScore;
+  } | null = null;
+
+  const consider = (candidate: { schedules: SemesterSchedules; splits: SemesterSplit[] }): boolean => {
+    const score = buildScore(candidate.schedules, candidate.splits, project, fixedRules);
+    if (!best || compareScores(score, best.score) > 0) {
+      best = {
+        ...candidate,
+        quality: scoreVectorToNumber(score),
+        score,
+      };
+      return true;
+    }
+    return false;
+  };
+
+  if (mode === 'time') {
+    // Anytime mode (worker v0.3): keep improving candidates against a marching
+    // deadline and always return the best valid result found so far. The number
+    // of attempts is not fixed; the loop simply stops when the deadline fires.
+    const budgetMs = clampInt(settings?.generationTimeMs ?? 20000, 250, 600000);
+    const deadline = Date.now() + budgetMs;
+    let attempt = 0;
+    let reported = 0;
+    while (Date.now() < deadline) {
+      const candidate = await generateAttempt(0x9e3779b1 + ++attempt * 0x9e3779b1, 5, 85);
+      const improved = consider(candidate);
+      if (improved) {
+        const pct = Math.min(95, 5 + Math.floor((attempt / 20) * 90));
+        emit({ type: 'PROGRESS', payload: { progress: pct, mode, bestQuality: Math.round(best!.quality) } });
+        reported = pct;
+      }
+      if (attempt - reported > 40) {
+        emit({ type: 'PROGRESS', payload: { progress: reported, mode, bestQuality: Math.round(best!.quality) } });
+        reported = attempt;
+      }
+    }
+    emit({ type: 'PROGRESS', payload: { progress: 100, mode, bestQuality: Math.round(best!.quality) } });
+    emit({
+      type: 'RESULT',
+      payload: {
+        mode,
+        schedules: best!.schedules,
+        splits: best!.splits,
+        attempts: attempt,
+        generationTimeMs: budgetMs,
+        bestQuality: best!.quality,
+        gapReport: {
+          semester1: teacherGapReport(best!.schedules.semester1.schedule),
+          semester2: teacherGapReport(best!.schedules.semester2.schedule),
+        },
+      },
+    });
+    return;
+  }
+
+  // Mode `runs` (backward compatible): a bounded number of full candidates, best
+  // kept. This is the deterministic path used by the existing tests and callers.
   for (let attempt = 0; attempt < attempts; attempt++) {
     const progressBase = Math.floor((attempt / attempts) * 95);
     const progressSpan = 95 / attempts;
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
-    const quality = scoreAttempt(candidate.schedules, candidate.splits, project, fixedRules);
-    if (!best || quality > best.quality) {
-      best = { ...candidate, quality };
-    }
+    consider(candidate);
     emit({
       type: 'PROGRESS',
       payload: {
@@ -1297,15 +1260,17 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
         attempt: attempt + 1,
         attempts,
         bestQuality: Math.round(best!.quality),
+        mode,
       },
     });
   }
 
-  emit({ type: 'PROGRESS', payload: { progress: 100, attempt: attempts, attempts, bestQuality: Math.round(best!.quality) } });
+  emit({ type: 'PROGRESS', payload: { progress: 100, attempt: attempts, attempts, bestQuality: Math.round(best!.quality), mode } });
 
   emit({
     type: 'RESULT',
     payload: {
+      mode,
       schedules: best!.schedules,
       splits: best!.splits,
       attempts,

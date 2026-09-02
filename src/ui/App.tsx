@@ -52,7 +52,12 @@ function AppContent() {
         }
       } else if (type === 'RESULT') {
         const attempts = payload?.attempts;
-        setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
+        const genMode = payload?.mode;
+        if (genMode === 'time') {
+          setWorkerStatus(`${t('schedule_generated')} · ${t('generation_time_short', { ms: payload?.generationTimeMs ?? '' })}`);
+        } else {
+          setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
+        }
         setGenerating(false);
         setProgress(null);
         updateGeneratedSchedules(payload?.schedules);
@@ -110,16 +115,13 @@ function AppContent() {
     }
   };
 
-  const [generateSettings, setGenerateSettings] = useState<GenerateSettings>({ attempts: 20, maxSpillPasses: 4 });
+  const [generateSettings, setGenerateSettings] = useState<GenerateSettings>({ mode: 'runs', attempts: 20, maxSpillPasses: 4, generationTimeMs: 20000 });
   const [generateSettingsOpen, setGenerateSettingsOpen] = useState(false);
 
-  const handleGenerateClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      setGenerateSettingsOpen(true);
-      return;
-    }
-    handleGenerateSchedule();
+  // Generation settings are always shown so the user can pick a driver mode
+  // (runs vs. time budget); Ctrl is no longer required to open them.
+  const handleGenerateClick = () => {
+    setGenerateSettingsOpen(true);
   };
 
   const handleGenerateWithSettings = (settings: GenerateSettings) => {

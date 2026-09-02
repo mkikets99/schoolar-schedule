@@ -33,7 +33,12 @@ export interface Subject {
 export interface Room {
   id: string;
   name: string;
-  capacity?: number;
+  /**
+   * How many groups may occupy the room in the same slot simultaneously.
+   * Most rooms fit one group (default), but shared facilities such as a
+   * gymnasium or PE hall host several classes at once. Undefined means 1.
+   */
+  maxGroups?: number;
   types: string[]; // e.g., "lab", "classroom", "gym"
 }
 
@@ -153,25 +158,79 @@ export function computeGroupScheduleConfig(group: Partial<Group> | undefined): G
   return { periodStart, periodEnd, maxDaily: cappedMax };
 }
 
+/**
+ * How the generator is driven. `runs` generates one candidate schedule per
+ * `attempts` and keeps the best; `time` is the anytime mode from worker v0.3
+ * that keeps improving against a marching `generationTimeMs` deadline and
+ * returns the best schedule found before it fires. The default remains `runs`
+ * so existing callers keep their deterministic attempt-count behaviour.
+ */
+export type GenerationMode = 'runs' | 'time';
+
 export interface GenerateSettings {
-  /** Number of candidate schedules to generate and keep the best of. */
+  /**
+   * Driver mode. `runs` uses `attempts`; `time` uses `generationTimeMs`.
+   * Defaults to `runs` when unset for backward compatibility.
+   */
+  mode?: GenerationMode;
+  /** Number of candidate schedules to generate and keep the best of (mode `runs`). */
   attempts: number;
+  /**
+   * Generation deadline in milliseconds (mode `time`). The anytime optimizer
+   * builds the initial schedule, then repeatedly improves it and preserves the
+   * best valid result until `generationTimeMs` elapses, at which point that
+   * best schedule is returned. Defaults to 20000 when unset in time mode.
+   */
+  generationTimeMs?: number;
   /** How many times unplaced lessons may be re-distributed between semesters. */
   maxSpillPasses: number;
+  /**
+   * Optional secondary rearrange search budget (mode `runs`). A per-call node
+   * ceiling so interactive edit-mode rearrange stays responsive even when no
+   * time budget is set. Omitted means the engine only respects the time/deadline
+   * (or its own guard rails) exactly as the worker v0.3 spec requires.
+   */
+  maxRearrangeNodes?: number;
   /** How many improvement passes run to shrink teacher free gaps after placement. */
   optimizePasses?: number;
+}
+
+/**
+ * A lexicographic schedule score vector (worker v0.3 spec §4/§23). Every field
+ * is written so that a *smaller* value is *better*; the canonical ordering walks
+ * them in priority order and higher is better by overall comparison. The first
+ * field is completeness, so a complete but lower-quality timetable always beats
+ * an incomplete one - never the reverse (spec §36 / acceptance Test 7).
+ */
+export interface ScheduleScore {
+  /** Total unresolved lessons across both semesters (0 = complete). Smaller is better. */
+  unscheduledLessons: number;
+  /** Pending hours for FORBID_LESSON-pinned rules (heavily weighted tie-break). */
+  pinnedUnassigned: number;
+  /** Sum of every teacher's weekly free-hour gaps across both semesters. */
+  teacherTotalGapLength: number;
+  /** Number of teachers whose weekly gap exceeds the "bad" threshold. */
+  teacherLongGapCount: number;
+  /** Number of single-lesson teacher days (sparse-day penalty). */
+  sparseTeacherDayCount: number;
+  /** Penalty for deviation from the intended per-semester load distribution. */
+  distributionPenalty: number;
+  /** Total number of placed lessons (informational; kept last for display). */
+  scheduledLessons: number;
 }
 
 /** Per-attempt generation progress report sent from the worker. */
 export interface ProgressPayload {
   /** Overall completion in the 0-100 range. */
   progress: number;
-  /** The attempt ordinal (1-based) this report belongs to. */
+  /** The attempt ordinal (1-based) this report belongs to (mode `runs`). */
   attempt?: number;
-  /** Total number of attempts being run. */
+  /** Total number of attempts being run (mode `runs`). */
   attempts?: number;
-  /** Best candidate quality achieved so far. */
+  /** Best candidate quality achieved so far (informational scalar). */
   bestQuality?: number;
+  /** The active generator driver mode, so the UI can label progress correctly. */
+  mode?: GenerationMode;
 }
 
 /** A single additional lesson relocation suggested by the rearrangement engine. */

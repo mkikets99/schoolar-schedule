@@ -76,43 +76,43 @@ for (let i = 1; i <= 20; i++) {
   rooms.push({
     id: `r-${String(i).padStart(2, '0')}`,
     name: `Room ${100 + i}`,
-    capacity: 36,
+    maxGroups: 1,
     types: ['classroom'],
   });
 }
 // 2 small rooms for splits
-rooms.push({ id: 'r-21', name: 'Small Room A', capacity: 15, types: ['classroom'] });
-rooms.push({ id: 'r-22', name: 'Small Room B', capacity: 15, types: ['classroom'] });
+rooms.push({ id: 'r-21', name: 'Small Room A', maxGroups: 1, types: ['classroom'] });
+rooms.push({ id: 'r-22', name: 'Small Room B', maxGroups: 1, types: ['classroom'] });
 // Computer labs (for Informatics)
-rooms.push({ id: 'r-23', name: 'Computer Lab A', capacity: 18, types: ['computer-lab'] });
-rooms.push({ id: 'r-24', name: 'Computer Lab B', capacity: 18, types: ['computer-lab'] });
-rooms.push({ id: 'r-25', name: 'Computer Lab C', capacity: 18, types: ['computer-lab'] });
+rooms.push({ id: 'r-23', name: 'Computer Lab A', maxGroups: 1, types: ['computer-lab'] });
+rooms.push({ id: 'r-24', name: 'Computer Lab B', maxGroups: 1, types: ['computer-lab'] });
+rooms.push({ id: 'r-25', name: 'Computer Lab C', maxGroups: 1, types: ['computer-lab'] });
 // Workshops (for Technology)
-rooms.push({ id: 'r-26', name: 'Workshop A', capacity: 18, types: ['workshop'] });
-rooms.push({ id: 'r-27', name: 'Workshop B', capacity: 18, types: ['workshop'] });
-rooms.push({ id: 'r-28', name: 'Workshop C', capacity: 18, types: ['workshop'] });
-// PE
-rooms.push({ id: 'r-29', name: 'Gymnasium', capacity: 60, types: ['gym'] });
-rooms.push({ id: 'r-30', name: 'Sports Hall', capacity: 60, types: ['gym'] });
+rooms.push({ id: 'r-26', name: 'Workshop A', maxGroups: 1, types: ['workshop'] });
+rooms.push({ id: 'r-27', name: 'Workshop B', maxGroups: 1, types: ['workshop'] });
+rooms.push({ id: 'r-28', name: 'Workshop C', maxGroups: 1, types: ['workshop'] });
+// PE - gyms host several groups at once
+rooms.push({ id: 'r-29', name: 'Gymnasium', maxGroups: 3, types: ['gym'] });
+rooms.push({ id: 'r-30', name: 'Sports Hall', maxGroups: 3, types: ['gym'] });
 // Art studio
-rooms.push({ id: 'r-31', name: 'Art Studio', capacity: 30, types: ['art-studio'] });
+rooms.push({ id: 'r-31', name: 'Art Studio', maxGroups: 1, types: ['art-studio'] });
 // Music room
-rooms.push({ id: 'r-32', name: 'Music Room', capacity: 30, types: ['music-room'] });
+rooms.push({ id: 'r-32', name: 'Music Room', maxGroups: 1, types: ['music-room'] });
 // Library
-rooms.push({ id: 'r-33', name: 'Library', capacity: 36, types: ['classroom'] });
+rooms.push({ id: 'r-33', name: 'Library', maxGroups: 1, types: ['classroom'] });
 
 // Fill up to 50 with generic classrooms
 for (let i = 34; i <= 50; i++) {
   rooms.push({
     id: `r-${String(i).padStart(2, '0')}`,
     name: `Room ${200 + i}`,
-    capacity: 36,
+    maxGroups: 1,
     types: ['classroom'],
   });
 }
 
 // --- Assign each group a homeroom (classroom) ---
-const homerooms = rooms.filter(r => r.types.includes('classroom') && r.capacity >= 30);
+const homerooms = rooms.filter(r => r.types.includes('classroom') && r.maxGroups >= 1);
 let roomIdx = 0;
 const groupHomeroom = new Map();
 for (const group of groups) {
@@ -184,8 +184,8 @@ function getRoomFor(subjectId, groupId, isSplit = false) {
     return rooms.find(r => r.types.includes('music-room'));
   }
   const hr = groupHomeroom.get(groupId);
-  if (hr && hr.capacity >= 36) return hr;
-  const pool = rooms.filter(r => r.types.includes('classroom') && r.capacity >= 30);
+  if (hr) return hr;
+  const pool = rooms.filter(r => r.types.includes('classroom'));
   return pool[roomDistIdx++ % pool.length];
 }
 
@@ -277,7 +277,7 @@ console.log(`Created example.schoolproj with:
   - ${groups.length} groups (grades ${Math.min(...groups.map(g => g.grade))}-${Math.max(...groups.map(g => g.grade))})
   - ${teachers.length} teachers
   - ${subjects.length} subjects
-  - ${rooms.length} rooms (${rooms.filter(r => r.capacity === 15).length} small, ${rooms.filter(r => r.capacity >= 30).length} standard)
+  - ${rooms.length} rooms (${rooms.filter(r => r.types.includes('gym')).length} shared gyms, ${rooms.filter(r => (r.maxGroups ?? 1) === 1).length} single-group rooms)
   - ${curriculum.length} curriculum rules
   - ${splitGroups.length} groups with subgroup splits
   - Homeroom assignment: each group has a dedicated classroom`);
