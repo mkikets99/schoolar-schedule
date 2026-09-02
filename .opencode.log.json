@@ -32,7 +32,7 @@
     "worker": {
       "src/worker/worker.ts": "Message handler, dispatches to generator; INIT / GENERATE_SCHEDULE / REARRANGE",
       "src/worker/generator.ts": "Core scheduling engine (861 lines). Semester-split generation, multi-attempt best-of, spill passes, scoring; emits per-attempt PROGRESS payloads",
-      "src/worker/rearrange.ts": "Pure suggestRearrange engine: direct move -> eligible teacher swap -> blocker relocation; hard-infeasible on same-group slot, NO_FIRST_PERIOD, daily caps"
+      "src/worker/rearrange.ts": "Pure suggestRearrange engine: direct/free-slot move -> eligible teacher swap -> deep blocker displacement cascade (recursive relocate(), up to maxDepth swaps, node-budgeted, claimed-slot reservations). resolvePlacement takes maxDepth: edit-mode entry points use 15, generation-time resolveUnplacedPlacement stays 1. Edit-mode infeasible drops force-insert the lesson directly (no modal) and the grid analyzer flags resulting conflicts"
     },
     "shared": {
       "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings, ProjectState, computeGroupScheduleConfig(), autoMaxPerDay(), buildMaxDailyByRule(), ProgressPayload, RearrangeMove, RearrangeSuggestion, WorkerMessageType",
@@ -102,7 +102,7 @@
   },
   "tests": {
     "framework": "Vitest",
-    "count": 187,
+    "count": 197,
     "files": 18,
     "status": "ALL PASSING",
     "testFiles": [
@@ -136,6 +136,12 @@
   },
   "completedTasks": [
     {
+      "id": "v0.2.1-force-insert-deep-rearrange",
+      "date": "2026-09-02",
+      "title": "Deep 15-swap rearrange cascade + force-insert fallback in edit mode",
+      "body": "Removed the hard block on drag-drop inserts in edit mode. Drop resolution now asks the engine for a deep rearrangement first: resolvePlacement gained maxDepth (edit-mode suggestRearrange/suggestRearrangeChoices pass 15, generation-time resolveUnplacedPlacement stays 1) and a recursive relocate() displaces colliding teacher/room occupants toward a hole, bounded by a 12000-node budget (searchNodes). A per-suggestion 'claimed' slot set reserves the main target and prevents two displaced lessons landing in the same destination slot (fixes the realProject.test.ts invariant violation). When no rearrangement can open the slot, InlineEditor force-inserts the lesson directly via commitFromMoves with feasible:true and no modal; the grid analyzer flags resulting conflicts. Removed the rearrange_block* modal and 9 i18n keys (en/uk). Split/double-partner lessons stay unmovable in the cascade. Tests: new rearrange.test.ts cascade fixture (9 groups, busy teacher, displaced chain -> hole) and two InlineEditor blocked->force-insert cases. Full suite 197 tests / 18 files green; tsc + npm run build green."
+    },
+    {
       "id": "v0.2.1-ai-rearrange",
       "date": "2026-09-01",
       "title": "Worker-side AI rearrangement with edit-mode confirm + fluent progress UI",
@@ -152,13 +158,14 @@
     "View/Edit toggling in ScheduleViewer (view mode currently re-renders edits)", 
     "Edit teacher in schedule in InlineEditor (teacher-mode empty-edit issues)",
     "UI/UX polish: verify confirm-modal day-name translations, teacher-swap badge styling",
-    "Opportunity: reuse REARRANGE_RESULT at generation time (auto-resolve conflicts)"
+    "Opportunity: apply the depth-15 rearrange cascade at generation time to auto-resolve conflicts (currently depth 1 via resolveUnplacedPlacement)"
   ],
   "notes": [
     "Project is fully client-side, offline-first, runs on GitHub Pages",
     "All state persisted to IndexedDB with autosave",
     ".schoolproj files are JSON-based with schema versioning",
-    "2026-09-01: All 187 tests pass (18 files); AI rearrange + progress UI committed as ad2e85c",
+    "2026-09-02: All 197 tests pass (18 files); force-insert + 15-swap rearrange cascade implemented (uncommitted)",
+    "2026-09-02: npm run lint is broken in this repo (eslint not in devDependencies and no eslint.config.*; eslint 10 resolves via npx but cannot run) - pre-existing, not introduced by the feature change",
     "2026-09-01: All 175 tests pass (17 files); automatic daily limits committed as part of v0.2.1",
     "Generator uses deterministic PRNG (mulberry32) for reproducible attempts",
     "jsdom drop events carry no clientX; InlineEditor drag-drop tests drop at Monday/period 1 (fixtures keep that slot free unless testing the blocked path)",
