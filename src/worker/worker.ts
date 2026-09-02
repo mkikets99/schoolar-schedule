@@ -2,6 +2,8 @@ import { ProjectState, Lesson } from '../shared/types';
 import { generateSemesterSchedules } from './generator';
 import { suggestRearrange, suggestRearrangeChoices } from './rearrange';
 
+let cancelled = false;
+
 self.onmessage = (event) => {
   const { type, payload } = event.data;
 
@@ -16,9 +18,14 @@ self.onmessage = (event) => {
     case 'GENERATE_SCHEDULE': {
       const project = payload?.project ?? payload;
       const settings = payload?.settings;
-      generateSemesterSchedules(project as ProjectState, (msg) => self.postMessage(msg), settings);
+      cancelled = false;
+      generateSemesterSchedules(project as ProjectState, (msg) => self.postMessage(msg), settings, () => cancelled);
       break;
     }
+
+    case 'CANCEL':
+      cancelled = true;
+      break;
 
     case 'REARRANGE': {
       const project = payload?.project ?? {};

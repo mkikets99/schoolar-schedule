@@ -1095,15 +1095,29 @@ function collectUnassigned(result: ScheduleResult): Map<string, number> {
   return map;
 }
 
-export async function generateSemesterSchedules(project: ProjectState, emit: (msg: WorkerMessage) => void, settings?: Partial<GenerateSettings>) {
+export async function generateSemesterSchedules(
+  project: ProjectState,
+  emit: (msg: WorkerMessage) => void,
+  settings?: Partial<GenerateSettings>,
+  isCancelled?: () => boolean
+) {
   // Generate many candidate schedules and keep the one that places the most
   // lessons while producing the tightest teacher free-hour distribution.
   // Budgets are configurable and intentionally NOT capped at the top (worker v0.3
   // spec §22): a user may raise them arbitrarily for deeper/stronger searches. A
   // floor is kept only to reject nonsensical values, never an upper bound.
-  const attempts = Math.max(1, Math.trunc(settings?.attempts ?? 20) || 1);
-  const maxSpillPasses = Math.max(0, Math.trunc(settings?.maxSpillPasses ?? 4) || 0);
-  const optimizePasses = Math.max(0, Math.trunc(settings?.optimizePasses ?? DEFAULT_OPTIMIZE_PASSES) || 0);
+  //
+  // Every budget accepts -1 as "Unlimited": attempts/optimizePasses and
+  // maxSpillPasses want this to keep searching until convergence or the user
+  // cancels, while maxRearrangeNodes simply drops its count ceiling. A helper
+  // maps -1 to a sentinel (MAX_SAFE_INTEGER) so the many existing `for` loops
+  // keep their shape and only need a user-cancel check bolted on top.
+  const unlimited = (v: number | undefined, floor: number, fallback: number) =>
+    v === -1 ? Number.MAX_SAFE_INTEGER : Math.max(floor, Math.trunc(v ?? fallback) || floor);
+  const attemptsUnlimited = settings?.attempts === -1;
+  const attempts = attemptsUnlimited ? Number.MAX_SAFE_INTEGER : Math.max(1, Math.trunc(settings?.attempts ?? 20) || 1);
+  const maxSpillPasses = unlimited(settings?.maxSpillPasses, 0, 4);
+  const optimizePasses = unlimited(settings?.optimizePasses, 0, DEFAULT_OPTIMIZE_PASSES);
 
   // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
   // the spillover must not move lessons across (respecting the forbid).
@@ -1181,7 +1195,10 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
   }
 
   const mode: 'runs' | 'time' = settings?.mode ?? 'runs';
-  const maxRearrangeNodes = settings?.maxRearrangeNodes;
+  // maxRearrangeNodes: undefined/null and -1 both mean "no count ceiling" (§22);
+  // resolveUnplacedPlacement/autoResolveUnassigned treat a missing budget as
+  // unbounded (time/deadline bounded only), so -1 is collapsed to null here.
+  const maxRearrangeNodes = settings?.maxRearrangeNodes === -1 ? undefined : settings?.maxRearrangeNodes;
 
   // Best-known state plus its canonical score for lexicographic comparison.
   let best: {
@@ -1207,12 +1224,17 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
   if (mode === 'time') {
     // Anytime mode (worker v0.3): keep improving candidates against a marching
     // deadline and always return the best valid result found so far. The number
-    // of attempts is not fixed; the loop simply stops when the deadline fires.
+    // of attempts is not fixed; the loop stops when the deadline fires, or runs
+    // until the user cancels when generationTimeMs is -1 (Unlimited).
+    const unlimitedTime = settings?.generationTimeMs === -1;
     const budgetMs = Math.max(250, Math.trunc(settings?.generationTimeMs ?? 20000) || 20000);
-    const deadline = Date.now() + budgetMs;
+    const deadline = Date.now() + (unlimitedTime ? Number.MAX_SAFE_INTEGER : budgetMs);
     let attempt = 0;
     let reported = 0;
-    while (Date.now() < deadline) {
+    while (!(isCancelled?.() ?? false) && Date.now() < deadline) {
+      // Unlimited time needs the event loop freed between attempts too, so a
+      // CANCEL can land; the bounded path keeps chewing through the deadline.
+      if (unlimitedTime) await new Promise((r) => setTimeout(r, 0));
       const candidate = await generateAttempt(0x9e3779b1 + ++attempt * 0x9e3779b1, 5, 85);
       const improved = consider(candidate);
       if (improved) {
@@ -1233,7 +1255,8 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
         schedules: best!.schedules,
         splits: best!.splits,
         attempts: attempt,
-        generationTimeMs: budgetMs,
+        generationTimeMs: unlimitedTime ? 0 : budgetMs,
+        cancelled: (isCancelled?.() ?? false) && unlimitedTime,
         bestQuality: best!.quality,
         gapReport: {
           semester1: teacherGapReport(best!.schedules.semester1.schedule),
@@ -1246,24 +1269,32 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
 
   // Mode `runs` (backward compatible): a bounded number of full candidates, best
   // kept. This is the deterministic path used by the existing tests and callers.
+  // A -1 (Unlimited) attempt count keeps running until the user cancels.
+  let completed = 0;
   for (let attempt = 0; attempt < attempts; attempt++) {
+    if (isCancelled?.()) break;
     const progressBase = Math.floor((attempt / attempts) * 95);
-    const progressSpan = 95 / attempts;
+    const progressSpan = attemptsUnlimited ? 95 / (attempt + 1) : 95 / attempts;
+    // In Unlimited mode there is no natural stop, so hand the event loop back
+    // between attempts to let a CANCEL message / external flag actually be
+    // observed; otherwise a fully-synchronous schedule build would starve it.
+    if (attemptsUnlimited) await new Promise((r) => setTimeout(r, 0));
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
     consider(candidate);
+    completed = attempt + 1;
     emit({
       type: 'PROGRESS',
       payload: {
         progress: Math.floor(((attempt + 1) / attempts) * 95),
         attempt: attempt + 1,
-        attempts,
+        attempts: attemptsUnlimited ? attempt + 1 : attempts,
         bestQuality: Math.round(best!.quality),
         mode,
       },
     });
   }
 
-  emit({ type: 'PROGRESS', payload: { progress: 100, attempt: attempts, attempts, bestQuality: Math.round(best!.quality), mode } });
+  emit({ type: 'PROGRESS', payload: { progress: 100, attempt: completed, attempts: completed, bestQuality: Math.round(best!.quality), mode } });
 
   emit({
     type: 'RESULT',
@@ -1271,7 +1302,8 @@ export async function generateSemesterSchedules(project: ProjectState, emit: (ms
       mode,
       schedules: best!.schedules,
       splits: best!.splits,
-      attempts,
+      attempts: completed,
+      cancelled: isCancelled?.(),
       bestQuality: best!.quality,
       gapReport: {
         semester1: teacherGapReport(best!.schedules.semester1.schedule),

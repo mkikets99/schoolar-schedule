@@ -149,8 +149,8 @@ class WorkerPool {
       worker.postMessage({ type: queued.job.kind, payload: queued.job.payload });
     }
   }
+/**
 
-  /**
    * Run a job and resolve with its final payload (RESULT / REARRANGE_RESULT).
    * Rejects if the worker reports ERROR. Jobs execute in parallel across the
    * pool, so a long generation does not block other jobs' workers.
@@ -161,6 +161,26 @@ class WorkerPool {
       this.queue.push({ job, resolve, reject });
       this.pump();
     });
+  }
+
+  /**
+   * Ask the worker running `job` to stop. Posts a `CANCEL` to that worker so an
+   * unlimited (attempts/time -1) generation halts at the next attempt boundary.
+   * The job's promise still resolves with the RESULT payload delivered by the
+   * worker (flagged `cancelled`); if the job is queued but not yet started it is
+   * removed from the queue. Resolving jobs are unaffected.
+   */
+  cancel(job: PoolJob): void {
+    const running = this.workers.find((w) => this.active.get(w)?.job === job);
+    if (running) {
+      running.postMessage({ type: 'CANCEL' });
+      return;
+    }
+    const idx = this.queue.findIndex((q) => q.job === job);
+    if (idx >= 0) {
+      const [queued] = this.queue.splice(idx, 1);
+      queued?.reject(new Error('cancelled'));
+    }
   }
 
   terminate(): void {

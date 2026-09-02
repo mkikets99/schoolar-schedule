@@ -52,6 +52,16 @@ describe('GenerateModal', () => {
     expect(onGenerate).toHaveBeenCalledWith(expect.objectContaining({ attempts: 1 }));
   });
 
+  it('passes -1 through as Unlimited for every param', () => {
+    const onGenerate = vi.fn();
+    render(<GenerateModal open settings={settings} onClose={() => {}} onGenerate={onGenerate} />);
+    fireEvent.change(spinbuttons()[0], { target: { value: '-1' } });
+    fireEvent.change(spinbuttons()[1], { target: { value: '-1' } });
+    fireEvent.change(spinbuttons()[2], { target: { value: '-1' } });
+    fireEvent.click(screen.getByText('generate'));
+    expect(onGenerate).toHaveBeenCalledWith({ mode: 'runs', attempts: -1, maxSpillPasses: -1, optimizePasses: -1, generationTimeMs: 20000 });
+  });
+
   it('closes without generating on Cancel', () => {
     const onClose = vi.fn();
     const onGenerate = vi.fn();

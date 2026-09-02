@@ -173,25 +173,40 @@ export interface GenerateSettings {
    * Defaults to `runs` when unset for backward compatibility.
    */
   mode?: GenerationMode;
-  /** Number of candidate schedules to generate and keep the best of (mode `runs`). */
+  /**
+   * Number of candidate schedules to generate and keep the best of (mode `runs`).
+   * `-1` means Unlimited: keep generating until the user cancels (a CANCEL is
+   * issued to the worker) - there is no fixed denominator, so progress shows the
+   * attempt count rather than a percent.
+   */
   attempts: number;
   /**
    * Generation deadline in milliseconds (mode `time`). The anytime optimizer
    * builds the initial schedule, then repeatedly improves it and preserves the
    * best valid result until `generationTimeMs` elapses, at which point that
    * best schedule is returned. Defaults to 20000 when unset in time mode.
+   * `-1` means Unlimited: improve until the user cancels.
    */
   generationTimeMs?: number;
-  /** How many times unplaced lessons may be re-distributed between semesters. */
+  /**
+   * How many times unplaced lessons may be re-distributed between semesters.
+   * `-1` means Unlimited; the pass naturally stops when no lesson can be moved
+   * any further.
+   */
   maxSpillPasses: number;
   /**
    * Optional secondary rearrange search budget (mode `runs`). A per-call node
    * ceiling so interactive edit-mode rearrange stays responsive even when no
-   * time budget is set. Omitted means the engine only respects the time/deadline
-   * (or its own guard rails) exactly as the worker v0.3 spec requires.
+   * time budget is set. Omitted (or `null`) and `-1` mean the engine only
+   * respects the time/deadline (or its own guard rails) exactly as the worker
+   * v0.3 spec requires.
    */
   maxRearrangeNodes?: number;
-  /** How many improvement passes run to shrink teacher free gaps after placement. */
+  /**
+   * How many improvement passes run to shrink teacher free gaps after placement.
+   * `-1` means Unlimited; the pass stops on its own once no swap improves the
+   * schedule.
+   */
   optimizePasses?: number;
 }
 

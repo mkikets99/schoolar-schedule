@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ProjectProvider, useProject } from './context/ProjectContext';
 import { ProjectManager } from './components/ProjectManager';
@@ -13,7 +13,7 @@ import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
 import { GenerateModal } from './components/GenerateModal';
 import { GenerateSettings } from '../shared/types';
-import { workerPool } from './services/workerPool';
+import { workerPool, PoolJob } from './services/workerPool';
 import { exportProject } from './services/ProjectExportService';
 import { exportScheduleJSON } from './services/ExportService';
 import './index.css';
@@ -27,6 +27,7 @@ function AppContent() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [editorSession, setEditorSession] = useState(0);
+  const activeJobRef = useRef<PoolJob | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -69,34 +70,38 @@ function AppContent() {
     setGenerating(true);
     setProgress(0);
 
+    const job: PoolJob = {
+      kind: 'GENERATE_SCHEDULE',
+      payload: { project, settings: settingsOverride ?? generateSettings },
+      onProgress: (payload: any) => {
+        setGenerating(true);
+        const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
+        setProgress(pct);
+        if (payload?.attempt && payload?.attempts) {
+          setWorkerStatus(`${t('generating')} ${payload.attempt}/${payload.attempts} — ${pct}%`);
+        } else {
+          setWorkerStatus(`${t('generating')} ${pct}%`);
+        }
+      },
+    };
+    activeJobRef.current = job;
+
     workerPool
       .ready()
-      .then(() =>
-        workerPool.run({
-          kind: 'GENERATE_SCHEDULE',
-          payload: { project, settings: settingsOverride ?? generateSettings },
-          onProgress: (payload: any) => {
-            setGenerating(true);
-            const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
-            setProgress(pct);
-            if (payload?.attempt && payload?.attempts) {
-              setWorkerStatus(`${t('generating')} ${payload.attempt}/${payload.attempts} — ${pct}%`);
-            } else {
-              setWorkerStatus(`${t('generating')} ${pct}%`);
-            }
-          },
-        })
-      )
+      .then(() => workerPool.run(job))
       .then((payload: any) => {
         const attempts = payload?.attempts;
         const genMode = payload?.mode;
-        if (genMode === 'time') {
+        if (payload?.cancelled) {
+          setWorkerStatus(`${t('schedule_generated')} (${t('stopped')}, best of ${attempts})`);
+        } else if (genMode === 'time') {
           setWorkerStatus(`${t('schedule_generated')} · ${t('generation_time_short', { ms: payload?.generationTimeMs ?? '' })}`);
         } else {
           setWorkerStatus(attempts ? `${t('schedule_generated')} (best of ${attempts})` : t('schedule_generated'));
         }
         setGenerating(false);
         setProgress(null);
+        activeJobRef.current = null;
         updateGeneratedSchedules(payload?.schedules);
         updateGeneratedSplits(payload?.splits);
         setEditorSession((s) => s + 1);
@@ -105,8 +110,17 @@ function AppContent() {
         console.error('Generation failed:', err);
         setGenerating(false);
         setProgress(null);
+        activeJobRef.current = null;
         setWorkerStatus(t('worker_ready'));
       });
+  };
+
+  const handleCancelGeneration = () => {
+    if (activeJobRef.current) {
+      workerPool.cancel(activeJobRef.current);
+      activeJobRef.current = null;
+      setWorkerStatus(t('stopping'));
+    }
   };
 
   const [generateSettings, setGenerateSettings] = useState<GenerateSettings>({ mode: 'runs', attempts: 20, maxSpillPasses: 4, generationTimeMs: 20000 });
@@ -179,6 +193,9 @@ function AppContent() {
               <div className="progress-track">
                 <div className="progress-fill" style={{ width: `${progress}%` }} />
               </div>
+            )}
+            {generating && (
+              <button className="stop-btn" onClick={handleCancelGeneration}>{t('stop')}</button>
             )}
             {workerVersion && (
               <span className="worker-version" title={workerBuildVersion}>

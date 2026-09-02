@@ -28,13 +28,17 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
     }
   }, [open, settings]);
 
+  // Values ≤ the special marker -1 mean "Unlimited" and pass through untouched;
+  // any positive number is floored to its natural minimum to reject nonsense.
+  const normalize = (v: number, floor: number) => v === -1 ? -1 : Math.max(floor, Math.floor(v));
+
   const submit = () => {
     onGenerate({
       mode,
-      attempts: Math.max(1, Math.floor(attempts || 1)),
-      generationTimeMs: Math.max(250, Math.floor(generationTimeMs || 0)),
-      maxSpillPasses: Math.max(0, Math.floor(maxSpillPasses || 0)),
-      optimizePasses: Math.max(0, Math.floor(optimizePasses || 0)),
+      attempts: normalize(attempts, 1),
+      generationTimeMs: normalize(generationTimeMs, 250),
+      maxSpillPasses: normalize(maxSpillPasses, 0),
+      optimizePasses: normalize(optimizePasses, 0),
     });
   };
 
@@ -81,10 +85,11 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
           <FormField label={t('generate_attempts')}>
             <input
               type="number"
-              min={1}
+              min={-1}
               value={attempts}
               onChange={(e) => setAttempts(Number(e.target.value))}
             />
+            {attempts === -1 && <span className="unlimited-badge">{t('unlimited')}</span>}
           </FormField>
           <p className="form-hint">{t('generate_attempts_hint')}</p>
         </>
@@ -93,10 +98,11 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
           <FormField label={t('generate_time_ms')}>
             <input
               type="number"
-              min={250}
+              min={-1}
               value={generationTimeMs}
               onChange={(e) => setGenerationTimeMs(Number(e.target.value))}
             />
+            {generationTimeMs === -1 && <span className="unlimited-badge">{t('unlimited')}</span>}
           </FormField>
           <p className="form-hint">{t('generate_time_ms_hint')}</p>
         </>
@@ -105,19 +111,21 @@ export const GenerateModal = ({ open, settings, onClose, onGenerate }: GenerateM
       <FormField label={t('generate_max_spill_passes')}>
         <input
           type="number"
-          min={0}
+          min={-1}
           value={maxSpillPasses}
           onChange={(e) => setMaxSpillPasses(Number(e.target.value))}
         />
+        {maxSpillPasses === -1 && <span className="unlimited-badge">{t('unlimited')}</span>}
       </FormField>
       <p className="form-hint">{t('generate_max_spill_passes_hint')}</p>
       <FormField label={t('generate_optimize_passes')}>
         <input
           type="number"
-          min={0}
+          min={-1}
           value={optimizePasses}
           onChange={(e) => setOptimizePasses(Number(e.target.value))}
         />
+        {optimizePasses === -1 && <span className="unlimited-badge">{t('unlimited')}</span>}
       </FormField>
       <p className="form-hint">{t('generate_optimize_passes_hint')}</p>
     </Modal>

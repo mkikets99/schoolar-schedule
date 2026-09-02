@@ -133,3 +133,56 @@ describe('anytime generation (mode: time)', () => {
     expect(compareScores(long.score, short.score)).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('unlimited (-1) generation', () => {
+  it('runs mode with attempts: -1 keeps going until the user cancels', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+
+    let cancelled = false;
+    let attemptsSeen = 0;
+    const messages: { type: string; payload?: any }[] = [];
+
+    const promise = generateSemesterSchedules(
+      project,
+      (msg) => {
+        messages.push(msg);
+        if (msg.type === 'RESULT') attemptsSeen = msg.payload.attempts;
+      },
+      { mode: 'runs', attempts: -1, maxSpillPasses: 0 },
+      () => cancelled
+    );
+
+    // Let it run a couple of attempts, then cancel.
+    await new Promise((r) => setTimeout(r, 120));
+    cancelled = true;
+    const elapsedStart = Date.now();
+    await promise;
+    const elapsed = Date.now() - elapsedStart;
+
+    const result = messages.find((m) => m.type === 'RESULT');
+    expect(result).toBeDefined();
+    expect(attemptsSeen).toBeGreaterThan(1);
+    expect(result!.payload.cancelled).toBe(true);
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('accepts -1 as Unlimited for maxSpillPasses and optimizePasses', async () => {
+    const project = makeProject([
+      { id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' },
+    ]);
+
+    const messages: { type: string; payload?: any }[] = [];
+    await generateSemesterSchedules(project, (msg) => messages.push(msg), {
+      mode: 'runs',
+      attempts: 2,
+      maxSpillPasses: -1,
+      optimizePasses: -1,
+      maxRearrangeNodes: -1,
+    });
+    const result = messages.find((m) => m.type === 'RESULT');
+    expect(result).toBeDefined();
+    expect(result!.payload.schedules.semester1.schedule.length).toBe(5);
+  });
+});
