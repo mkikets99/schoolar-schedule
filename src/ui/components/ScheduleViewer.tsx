@@ -47,7 +47,6 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
 
   const [filterType, setFilterType] = useState<'group' | 'teacher' | 'subject' | 'all'>('all');
   const [filterId, setFilterId] = useState<string>('');
-  const [lockedLessons, setLockedLessons] = useState<Set<string>>(new Set());
   const [exportOpen, setExportOpen] = useState(false);
   const [unassignedOpen, setUnassignedOpen] = useState(false);
   const [gapsOpen, setGapsOpen] = useState(false);
@@ -291,16 +290,18 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
     unassignedHours,
     score,
   }), [schedule, groups, teachers, subjects, rooms, schoolName, conflictKeys, neededHours, assignedHours, unassignedHours, score]);
-  const toggleLock = (lessonId: string) => {
-    setLockedLessons(prev => {
-      const next = new Set(prev);
-      if (next.has(lessonId)) next.delete(lessonId);
-      else next.add(lessonId);
-      return next;
-    });
+  const matchesLock = (lesson: Lesson): boolean => {
+    const isSplit = Boolean(project?.generatedSchedules);
+    const semester = isSplit ? activeSemester : undefined;
+    return (project?.lockedLessons || []).some(l =>
+      l.ruleId === lesson.ruleId && l.day === lesson.day && l.period === lesson.period && l.semester === semester
+    );
   };
 
-  const isLocked = (lessonId: string) => lockedLessons.has(lessonId);
+  const isLocked = (lessonId: string) => {
+    const lesson = schedule.find(l => l.id === lessonId);
+    return lesson ? matchesLock(lesson) : false;
+  };
   const isConflict = (lessonId: string) => conflictKeys.has(lessonId);
 
   const handleEditorSave = (result: ScheduleResult, splits?: SemesterSplit[]) => {
@@ -474,7 +475,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                           return (
                             <div
                               className={`lesson-box ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''}`}
-                              onClick={() => toggleLock(lesson.id)}
+                              onClick={() => handleToggleLock(lesson)}
                               title={isLocked(lesson.id) ? t('click_to_unlock') : t('click_to_lock')}
                             >
                               <div className="subject">{getSubjectName(lesson.subjectId)}</div>
@@ -492,7 +493,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                               <div
                                 key={lesson.id}
                                 className={`lesson-box mini ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''}`}
-                                onClick={() => toggleLock(lesson.id)}
+                                onClick={() => handleToggleLock(lesson)}
                                 title={isLocked(lesson.id) ? t('click_to_unlock') : t('click_to_lock')}
                               >
                                 <div className="subject">{getSubjectName(lesson.subjectId)}</div>
