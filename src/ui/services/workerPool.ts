@@ -44,6 +44,7 @@ class WorkerPool {
   private queue: QueuedJob[] = [];
   private readyWaiters: (() => void)[] = [];
   private version: string | null = null;
+  private buildVersion: string | null = null;
 
   constructor(private size: number) {}
 
@@ -53,6 +54,10 @@ class WorkerPool {
 
   getVersion(): string | null {
     return this.version;
+  }
+
+  getBuildVersion(): string | null {
+    return this.buildVersion;
   }
 
   idleCount(): number {
@@ -97,6 +102,7 @@ class WorkerPool {
       if (msg.type === 'READY') {
         this.waiting.set(worker, true);
         if (!this.version) this.version = (msg.payload as any)?.version ?? this.version;
+        if (!this.buildVersion) this.buildVersion = (msg.payload as any)?.buildVersion ?? this.buildVersion;
         this.maybeReady();
         this.pump();
       }
@@ -165,6 +171,7 @@ class WorkerPool {
     this.queue = [];
     this.readyWaiters = [];
     this.version = null;
+    this.buildVersion = null;
   }
 }
 

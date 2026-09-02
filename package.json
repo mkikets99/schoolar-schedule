@@ -1,6 +1,6 @@
 {
   "name": "schoolar-schedule",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "School Scheduling Application (Client-side)",
   "type": "module",
   "scripts": {

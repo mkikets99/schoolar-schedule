@@ -33,7 +33,7 @@ function AppContent() {
     workerPool.ready().then(() => {
       if (!mounted) return;
       setWorkerVersion(workerPool.getVersion() ?? '');
-      setWorkerBuildVersion('');
+      setWorkerBuildVersion(workerPool.getBuildVersion() ?? '');
       setWorkerStatus(t('worker_ready'));
     });
     return () => {
