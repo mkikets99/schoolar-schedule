@@ -128,15 +128,14 @@ describe('InlineEditor', () => {
     expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 
-  it('shows a blocked notice when a pool lesson is dropped onto an occupied slot', () => {
+  it('force-inserts a pool lesson when the rearrange engine cannot open the slot', () => {
     const { container } = render(<InlineEditor project={makeProject()} activeSemester="semester1" onSave={vi.fn()} />);
     const chip = container.querySelector('.checker-chip')!;
     fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
     const dayTrack = container.querySelectorAll('.timeline-day')[0] as HTMLElement;
     fireEvent.drop(dayTrack, { clientX: 130, dataTransfer: { getData: vi.fn(() => '') } });
-    expect(screen.getByText('rearrange_blocked_title')).toBeTruthy();
-    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
-    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 
   it('proposes moving a blocking lesson and applies the change on confirm', () => {
@@ -334,7 +333,7 @@ describe('InlineEditor teacher edit mode', () => {
     expect(container.querySelector('.checker-empty')).toBeTruthy();
   });
 
-  it('blocks a pool placement that would swap the lesson to another teacher', () => {
+  it('force-inserts a pool placement that would otherwise swap the lesson to another teacher', () => {
     const project: ProjectState = {
       version: '1.0.0',
       school: { id: 's1', name: 'Test School' },
@@ -373,9 +372,9 @@ describe('InlineEditor teacher edit mode', () => {
       clientX: 130,
       dataTransfer: { getData: vi.fn(() => '') },
     });
-    expect(screen.getByText('rearrange_blocked_title')).toBeTruthy();
-    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
-    expect(container.querySelectorAll('.checker-chip').length).toBe(1);
+    expect(screen.queryByText('rearrange_blocked_title')).toBeNull();
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(2);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(0);
   });
 });
 

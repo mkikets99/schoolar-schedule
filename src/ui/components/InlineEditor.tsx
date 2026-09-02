@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CurriculumRule, Lesson, ProjectState, RearrangeBlockReason, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, SemesterSplit } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
 import { suggestRearrangeChoices } from '../../worker/rearrange';
 import { SearchableSelect } from './SearchableSelect';
@@ -48,7 +48,6 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     period: number;
     choices: RearrangeSuggestion[];
   } | null>(null);
-  const [blockedLesson, setBlockedLesson] = useState<{ name: string; day: string; period: number; reason?: RearrangeBlockReason } | null>(null);
   const historyRef = useRef<HistoryEntry[]>([]);
   const dragRef = useRef<string | null>(null);
   const lastSourceRef = useRef<{ semester: 'semester1' | 'semester2'; session: number | undefined } | null>(null);
@@ -61,19 +60,6 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
   const getSubject = (id: string) => subjects.find(s => s.id === id);
   const getGroupName = (id: string) => groups.find(g => g.id === id)?.name || '';
   const getTeacherName = (id?: string) => teachers.find(t => t.id === id)?.shortName || teachers.find(t => t.id === id)?.name || '';
-
-  const blockReasonKey = (reason: RearrangeBlockReason): string => {
-    const keyMap: Record<RearrangeBlockReason, string> = {
-      GROUP_SLOT: 'rearrange_block_group_slot',
-      NO_FIRST_PERIOD: 'rearrange_block_no_first',
-      DAILY_OVERLOAD: 'rearrange_block_daily_overload',
-      DAILY_RULE: 'rearrange_block_daily_rule',
-      TEACHER_BUSY: 'rearrange_block_teacher_busy',
-      SPLIT_PARTNER: 'rearrange_block_split_partner',
-      NO_SPACE: 'rearrange_block_no_space',
-    };
-    return keyMap[reason];
-  };
 
   const ruleById = useMemo(() => new Map((project.curriculum || []).map(r => [r.id, r])), [project.curriculum]);
   const lessonTeacherId = (lesson: Lesson) => lesson.teacherId || ruleById.get(lesson.ruleId)?.teacherId;
@@ -270,15 +256,15 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
     const feasible = choices.filter(c => c.feasible &&
       (editMode !== 'teacher' || !c.teacherIdForMain || c.teacherIdForMain === movedTeacherId));
 
-    const suggestion = feasible[0] ?? choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' as const };
-
-    if (feasible.length === 0 || !suggestion.feasible) {
-      const name = editMode === 'teacher'
-        ? getTeacherName(selectedTeacherId) || getTeacherName(movedTeacherId) || ''
-        : poolLesson
-          ? getGroupName(poolLesson.groupId)
-          : getGroupName(existing!.groupId);
-      setBlockedLesson({ name, day, period, reason: suggestion.reason });
+    // The rearrange engine (up to 15 swaps deep) could not open the slot, but a
+    // manual edit may still place the lesson there - the analyzer flags whatever
+    // this breaks on the grid instead of forbidding the insert.
+    if (feasible.length === 0) {
+      commitFromMoves(id, day, period, {
+        feasible: true,
+        moves: [{ lessonId: id, toDay: day, toPeriod: period }],
+        teacherIdForMain: movedTeacherId,
+      });
       return;
     }
 
@@ -288,6 +274,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
       return;
     }
 
+    const suggestion = feasible[0];
     const isDirect = suggestion.moves.length === 1 && !suggestion.teacherIdForMain;
     if (isDirect) {
       commitFromMoves(id, day, period, suggestion);
@@ -736,20 +723,6 @@ export const InlineEditor = ({ project, activeSemester, onSave, editMode = 'grou
         )}
         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
           <button onClick={() => setPendingChoices(null)} className="secondary-btn">{t('rearrange_confirm_cancel')}</button>
-        </div>
-      </Modal>
-
-      <Modal isOpen={!!blockedLesson} onClose={() => setBlockedLesson(null)} title={t('rearrange_blocked_title')}>
-        <p className="editor-hint">
-          {t('rearrange_blocked_desc', { group: blockedLesson?.name, day: blockedLesson ? t(blockedLesson.day.toLowerCase()) : '', period: blockedLesson?.period })}
-        </p>
-        {blockedLesson?.reason && (
-          <p className="editor-hint rearrange-block-reason">
-            {t(blockReasonKey(blockedLesson.reason))}
-          </p>
-        )}
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-          <button onClick={() => setBlockedLesson(null)} className="primary-btn">{t('ok')}</button>
         </div>
       </Modal>
     </div>

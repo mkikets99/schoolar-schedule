@@ -251,4 +251,63 @@ describe('suggestRearrange', () => {
     expect(s.feasible).toBe(false);
     expect(s.reason).toBe('GROUP_SLOT');
   });
+
+  it('cascades relocations deeper than one swap when no direct slot is reachable', () => {
+    // A board where every slot is occupied except Friday/2, and the moved
+    // lesson's teacher is busy there - so the first blocker cannot reach a free
+    // slot on its own and must displace a chain of colliding lessons (all share
+    // room r1) towards the hole. Depth-1 used to report this infeasible.
+    const project = makeProject({
+      teachers: [
+        { id: 'tA', name: 'Anna', subjects: ['math'] },
+        { id: 'tB', name: 'Bohdan', subjects: ['math'] },
+      ],
+      groups: Array.from({ length: 9 }, (_, i) => ({
+        id: `g${i + 1}`,
+        name: `G${i + 1}`,
+        grade: 5,
+        subgroups: [],
+        periodStart: 1,
+        periodEnd: 2,
+      })),
+      curriculum: Array.from({ length: 9 }, (_, i) => ({
+        id: `c${i + 1}`,
+        groupId: `g${i + 1}`,
+        subjectId: 'math',
+        hoursPerWeek: 6,
+        teacherId: i === 0 ? 'tA' : i === 1 ? 'tA' : 'tB',
+        roomId: 'r1',
+      })),
+      constraints: [{ id: 'busy', kind: 'TEACHER_BUSY', teacherId: 'tA', day: 'Friday', periods: [2] }] as any,
+    });
+    const lesson = (id: string, groupId: string, ruleId: string, teacherId: string, day: string, period: number) => ({
+      id,
+      ruleId,
+      groupId,
+      subjectId: 'math',
+      teacherId,
+      roomId: 'r1',
+      day,
+      period,
+    });
+    const schedule = [
+      lesson('l1', 'g1', 'c1', 'tA', 'Monday', 1),
+      lesson('e1', 'g1', 'c1', 'tA', 'Monday', 1),
+      lesson('B', 'g2', 'c2', 'tA', 'Monday', 2),
+      lesson('C', 'g3', 'c3', 'tB', 'Tuesday', 1),
+      lesson('D', 'g4', 'c4', 'tB', 'Tuesday', 2),
+      lesson('E', 'g5', 'c5', 'tB', 'Wednesday', 1),
+      lesson('F', 'g6', 'c6', 'tB', 'Wednesday', 2),
+      lesson('G', 'g7', 'c7', 'tB', 'Thursday', 1),
+      lesson('H', 'g8', 'c8', 'tB', 'Thursday', 2),
+      lesson('I', 'g9', 'c9', 'tB', 'Friday', 1),
+    ];
+    const s = suggestRearrange(project, schedule, 'l1', { day: 'Monday', period: 2 });
+    expect(s.feasible).toBe(true);
+    expect(s.moves[0]).toMatchObject({ lessonId: 'l1', toDay: 'Monday', toPeriod: 2 });
+    // The blocker B cannot land anywhere directly, so the solution must include
+    // at least one further relocation (a cascade of colliding lessons).
+    expect(s.moves.length).toBeGreaterThan(2);
+    expect(s.moves.slice(1).every((m) => m.lessonId !== 'l1')).toBe(true);
+  });
 });

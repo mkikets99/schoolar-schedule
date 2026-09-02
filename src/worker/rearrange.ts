@@ -196,7 +196,8 @@ function resolvePlacement(
   schedule: Lesson[],
   lesson: PlacableLesson,
   target: { day: string; period: number },
-  allowSubstitutes: boolean
+  allowSubstitutes: boolean,
+  maxDepth = 1
 ): RearrangeSuggestion[] {
   const {
     noFirstRules,
@@ -206,7 +207,6 @@ function resolvePlacement(
     mainTeacherIdOf,
     buildOccupancy,
     slotFree,
-    bestFreeSlot,
     isSplitOrDoublePartner,
   } = ctx;
   const moveTarget = { day: target.day, period: target.period };
@@ -230,19 +230,113 @@ function resolvePlacement(
     teacherId: teacherId !== originalTeacher ? teacherId : undefined,
   });
 
+  // Recursive relocation: move `o` to a valid slot, displacing the colliding
+  // teacher/room occupants when the slot is taken and repeating until either a
+  // free slot is reached or `depth` swaps are consumed. `excluded` carries the
+  // lessons already placed (moved) so a chain never revisits them; `claimed`
+  // reserves the target slots those moves occupy so no two moves end in the same
+  // slot. Returns the move list plus the final excluded set, or null when no
+  // cascade fits.
+  let searchNodes = 0;
+  const NODE_BUDGET = 12000;
+  const relocate = (
+    o: Lesson,
+    excluded: Set<string>,
+    depth: number,
+    claimed: Set<string>
+  ): { moves: RearrangeMove[]; excluded: Set<string> } | null => {
+    if (searchNodes > NODE_BUDGET) return null;
+    searchNodes++;
+    const cfgO = groupConfig.get(o.groupId);
+    const startO = cfgO?.periodStart ?? 1;
+    const endO = cfgO?.periodEnd ?? 8;
+    const occBase = buildOccupancy(schedule, excluded);
+    const capO = maxDailyByRule.get(o.ruleId);
+    const firstBlocked = (period: number) =>
+      period === startO &&
+      noFirstRules.some((r) => r.subjectId === o.subjectId && (!r.groupId || r.groupId === o.groupId));
+
+    const scored: { day: string; period: number; score: number }[] = [];
+    for (const day of DAYS) {
+      for (let period = startO; period <= endO; period++) {
+        if (claimed.has(`${day}|${period}`)) continue;
+        if (occBase.group.get(o.groupId)?.has(`${day}|${period}`)) continue;
+        if (o.teacherId && isBusy(o.teacherId, day, period)) continue;
+        if (firstBlocked(period)) continue;
+        if (capO !== undefined) {
+          const count = occBase.ruleDayCount.get(o.ruleId)?.get(day) || 0;
+          if (count >= capO) continue;
+        }
+        const sameDay = DAY_INDEX(day) === DAY_INDEX(o.day);
+        const score = sameDay
+          ? Math.abs(period - o.period)
+          : 1000 + Math.abs(DAY_INDEX(day) - DAY_INDEX(o.day)) + Math.abs(period - o.period);
+        scored.push({ day, period, score });
+      }
+    }
+    scored.sort((a, b) => a.score - b.score);
+
+    for (const slot of scored) {
+      if (slotFree(occBase, o, slot.day, slot.period)) {
+        const next = new Set(excluded);
+        next.add(o.id);
+        claimed.add(`${slot.day}|${slot.period}`);
+        return { moves: [{ lessonId: o.id, toDay: slot.day, toPeriod: slot.period }], excluded: next };
+      }
+      if (depth <= 0) continue;
+      const nextExcluded = new Set(excluded);
+      nextExcluded.add(o.id);
+      const colliders = schedule.filter(
+        (c) =>
+          c.id !== o.id &&
+          !nextExcluded.has(c.id) &&
+          c.day === slot.day &&
+          c.period === slot.period &&
+          ((o.teacherId && c.teacherId === o.teacherId) || (o.roomId && c.roomId === o.roomId))
+      );
+      if (colliders.length === 0) continue;
+      const displaced: RearrangeMove[] = [];
+      let ok = true;
+      for (const c of colliders) {
+        if (isSplitOrDoublePartner(schedule, c)) {
+          ok = false;
+          break;
+        }
+        const sub = relocate(c, nextExcluded, depth - 1, claimed);
+        if (!sub) {
+          ok = false;
+          break;
+        }
+        displaced.push(...sub.moves);
+        sub.excluded.forEach((id) => nextExcluded.add(id));
+        nextExcluded.add(c.id);
+      }
+      if (!ok) continue;
+      const occAfter = buildOccupancy(schedule, nextExcluded);
+      if (!slotFree(occAfter, o, slot.day, slot.period)) continue;
+      claimed.add(`${slot.day}|${slot.period}`);
+      return {
+        moves: [{ lessonId: o.id, toDay: slot.day, toPeriod: slot.period }, ...displaced],
+        excluded: nextExcluded,
+      };
+    }
+    return null;
+  };
+
   // Build a complete suggestion given an ordered list of extra lessons that are
   // moved away first (teacher/room blockers, daily-cap victims). Returns null if
-  // any extra lesson cannot be relocated or the target still isn't free.
-  const buildSuggestion = (teacherId: string, extraLessons: Lesson[]): RearrangeSuggestion | null => {
+  // any extra lesson cannot be relocated (via a cascade up to `depth` swaps) or
+  // the target still isn't free.
+  const buildSuggestion = (teacherId: string, extraLessons: Lesson[], depth: number): RearrangeSuggestion | null => {
     const excluded = new Set<string>([lesson.id]);
+    const claimed = new Set<string>([`${moveTarget.day}|${moveTarget.period}`]);
     const extras: RearrangeMove[] = [];
     for (const o of extraLessons) {
       if (isSplitOrDoublePartner(schedule, o)) return null;
-      const occI = buildOccupancy(schedule, excluded);
-      const slot = bestFreeSlot(occI, o);
-      if (!slot) return null;
-      excluded.add(o.id);
-      extras.push({ lessonId: o.id, toDay: slot.day, toPeriod: slot.period });
+      const res = relocate(o, excluded, depth, claimed);
+      if (!res) return null;
+      extras.push(...res.moves);
+      res.excluded.forEach((id) => excluded.add(id));
     }
     const occFinal = buildOccupancy(schedule, excluded);
     if (!slotFree(occFinal, lesson, moveTarget.day, moveTarget.period, teacherId)) return null;
@@ -272,7 +366,7 @@ function resolvePlacement(
           ((teacherId && o.teacherId === teacherId) || (lesson.roomId && o.roomId === lesson.roomId))
       );
       for (const blocker of blockers) {
-        const sol = buildSuggestion(teacherId, [blocker]);
+        const sol = buildSuggestion(teacherId, [blocker], maxDepth);
         if (sol) out.push(sol);
       }
 
@@ -286,7 +380,7 @@ function resolvePlacement(
             (o) => o.ruleId === lesson.ruleId && o.day === moveTarget.day && o.id !== lesson.id
           );
           for (const victim of victims) {
-            const sol = buildSuggestion(teacherId, [victim]);
+            const sol = buildSuggestion(teacherId, [victim], maxDepth);
             if (sol) out.push(sol);
           }
         }
@@ -374,7 +468,7 @@ export function suggestRearrangeChoices(
 ): RearrangeSuggestion[] {
   const lesson = schedule.find((l) => l.id === lessonId);
   if (!lesson) return [{ feasible: false, moves: [], reason: 'NO_SPACE' }];
-  return resolvePlacement(createRearrangeContext(project), schedule, lesson, target, true);
+  return resolvePlacement(createRearrangeContext(project), schedule, lesson, target, true, 15);
 }
 
 /**
@@ -390,7 +484,8 @@ export function suggestRearrangeChoices(
  *  2. relocate the lesson with an eligible substitute teacher (fixes a teacher
  *     busy/collision without touching any other lesson when the room is free),
  *  3. relocate the blocking / daily-cap lessons to free slots so the target
- *     opens up.
+ *     opens up; relocations may themselves displace occupants, cascading up to
+ *     15 swaps deep before the engine reports the move as infeasible.
  */
 export function suggestRearrange(
   project: ProjectState,
@@ -409,7 +504,8 @@ export function suggestRearrange(
     schedule,
     lesson,
     target,
-    !reassignTeacherId
+    !reassignTeacherId,
+    15
   );
   return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }
