@@ -112,7 +112,7 @@ class WorkerPool {
     const entry = this.active.get(worker);
     if (!entry) return;
 
-    if (msg.type === 'PROGRESS') {
+    if (msg.type === 'PROGRESS' || msg.type === 'LOG') {
       entry.job.onProgress?.(msg.payload);
       return;
     }

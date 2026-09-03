@@ -370,6 +370,7 @@ export type WorkerMessageType =
   | 'READY' 
   | 'GENERATE_SCHEDULE' 
   | 'PROGRESS' 
+  | 'LOG' 
   | 'REARRANGE' 
   | 'REARRANGE_RESULT' 
   | 'RESULT' 
@@ -380,4 +381,25 @@ export type WorkerMessageType =
 export interface WorkerMessage {
   type: WorkerMessageType;
   payload?: any;
+}
+
+/**
+ * A single human-readable action line emitted by the generator while it works,
+ * e.g. "Building semester 1…", "Gap optimization pass 3/8", "Attempt 5/20
+ * complete (best quality 12)". Displayed in the generation log modal - much like
+ * an installer's step list. `pct` (when present) snapshots progress at emit time.
+ */
+export interface GenerationLogEntry {
+  id: number;
+  /** Wall-clock time (ms since epoch) the entry was created on the worker. */
+  time: number;
+  /** Level drives the icon/badge colour in the log view (like an installer). */
+  level: 'info' | 'step' | 'success' | 'warn';
+  /** English, human-readable action text produced by the worker. */
+  message: string;
+  /** Optional snapshot of overall progress at emit time. */
+  pct?: number;
+  /** Optional "attempt x / y" context for easier scanning. */
+  attempt?: number;
+  attempts?: number;
 }

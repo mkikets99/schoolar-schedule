@@ -12,7 +12,7 @@
     "totalCommits": 103,
     "remote": "origin/main (up to date)",
     "untrackedFiles": [],
-    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation; teacher maxGroups (co-teaching) field"
+    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation; teacher maxGroups (co-teaching); generation log modal"
   },
   "stack": {
     "ui": "React 18 + Vite 4 + TypeScript 5",
@@ -139,6 +139,12 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "completedTasks": [
+    {
+      "id": "generation-log-modal",
+      "date": "2026-09-03",
+      "title": "Generation log modal (installer-style action steps shown while generating)",
+      "body": "Clicking the progress bar during generation now opens a log modal listing what the generator is doing (like an installer), not just a percent. Worker: adds a LOG WorkerMessageType + GenerationLogEntry type, and the generator emits action lines via emitLog() - setup/mode info, semester-1 & semester-2 placement steps, spill passes, attempt completions with best quality, and a completion/stopped line. workerPool routes LOG to the job's onProgress alongside PROGRESS; runScaled forwards LOG unchanged. UI: App.tsx accumulates LOG entries into state, makes the header progress bar a button ('Generation {progress}% [bar]') that opens a Modal listing the entries with per-level icons/badges (info/step/success/warn), % snapshots, auto-scroll, and a live progress summary. i18n keys generation, generation_log_hint/title/progress/entries/empty, close (en/uk). Tests: new src/test/worker/generationLog.test.ts. Full suite 228 tests / 24 files green; npm run build green."
+    },
     {
       "id": "teacher-maxgroups-coteaching",
       "date": "2026-09-03",

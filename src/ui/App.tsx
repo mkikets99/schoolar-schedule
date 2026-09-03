@@ -12,7 +12,8 @@ import { LoadDistributionUI } from './components/LoadDistributionUI';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
 import { GenerateModal } from './components/GenerateModal';
-import { GenerateSettings } from '../shared/types';
+import { Modal } from './components/Modal';
+import { GenerateSettings, GenerationLogEntry } from '../shared/types';
 import { workerPool, PoolJob } from './services/workerPool';
 import { exportProject } from './services/ProjectExportService';
 import { exportScheduleJSON } from './services/ExportService';
@@ -26,8 +27,18 @@ function AppContent() {
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [genLogs, setGenLogs] = useState<GenerationLogEntry[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
   const [editorSession, setEditorSession] = useState(0);
   const activeJobRef = useRef<PoolJob | null>(null);
+
+  // Auto-scroll the log list to the newest entry while the modal is open.
+  useEffect(() => {
+    if (logsOpen && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [genLogs, logsOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -69,11 +80,19 @@ function AppContent() {
     setWorkerStatus(t('starting_gen'));
     setGenerating(true);
     setProgress(0);
+    setGenLogs([]);
+    setLogsOpen(false);
 
     const job: PoolJob = {
       kind: 'GENERATE_SCHEDULE',
       payload: { project, settings: settingsOverride ?? generateSettings },
       onProgress: (payload: any) => {
+        // A LOG payload is a worker-produced action line for the generation log;
+        // a PROGRESS payload carries the percent and attempt context.
+        if (payload?.level) {
+          setGenLogs((prev) => [...prev, payload as GenerationLogEntry]);
+          return;
+        }
         setGenerating(true);
         const pct = Math.min(100, Math.max(0, payload?.progress ?? 0));
         setProgress(pct);
@@ -190,9 +209,16 @@ function AppContent() {
           <div className="status-bar">
             <span>{workerStatus}</span>
             {generating && progress !== null && (
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${progress}%` }} />
-              </div>
+              <button
+                className="progress-track progress-track-btn"
+                onClick={() => setLogsOpen(true)}
+                title={t('generation_log_hint')}
+              >
+                <span className="progress-label">
+                  {t('generation')} {Math.round(progress)}%
+                </span>
+                <span className="progress-fill" style={{ width: `${progress}%` }} />
+              </button>
             )}
             {generating && (
               <button className="stop-btn" onClick={handleCancelGeneration}>{t('stop')}</button>
@@ -298,6 +324,33 @@ function AppContent() {
         onClose={() => setGenerateSettingsOpen(false)}
         onGenerate={handleGenerateWithSettings}
       />
+
+      <Modal
+        isOpen={logsOpen}
+        onClose={() => setLogsOpen(false)}
+        title={t('generation_log_title')}
+        actions={
+          <>
+            <button onClick={() => setLogsOpen(false)} className="secondary-btn">{t('close')}</button>
+          </>
+        }
+      >
+        <div className="gen-log-summary">
+          <span>{t('generation_log_progress')}: <strong>{progress === null ? '—' : `${Math.round(progress)}%`}</strong></span>
+          <span>{t('generation_log_entries', { count: genLogs.length })}</span>
+        </div>
+        <div className="gen-log-list">
+          {genLogs.length === 0 && <div className="gen-log-empty">{t('generation_log_empty')}</div>}
+          {genLogs.map((entry) => (
+            <div key={entry.id} className={`gen-log-row gen-log-${entry.level}`}>
+              <span className="gen-log-badge" aria-hidden>{levelIcon(entry.level)}</span>
+              <span className="gen-log-message">{entry.message}</span>
+              {entry.pct !== undefined && <span className="gen-log-pct">{Math.round(entry.pct)}%</span>}
+            </div>
+          ))}
+          <div ref={logsEndRef} />
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -316,6 +369,15 @@ function hasAnySchedule(project: ReturnType<typeof useProject>['project']): bool
     return project.generatedSchedules.semester1.schedule.length > 0 || project.generatedSchedules.semester2.schedule.length > 0;
   }
   return (project.generatedSchedule?.schedule?.length || 0) > 0;
+}
+
+function levelIcon(level: GenerationLogEntry['level']): string {
+  switch (level) {
+    case 'success': return '✓';
+    case 'warn': return '!';
+    case 'step': return '▸';
+    default: return '•';
+  }
 }
 
 function assignedLessonCount(project: ReturnType<typeof useProject>['project']): number {

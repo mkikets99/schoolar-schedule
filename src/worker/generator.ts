@@ -1,8 +1,36 @@
-import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson, ScheduleScore } from '../shared/types';
+import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson, ScheduleScore, GenerationLogEntry } from '../shared/types';
 import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
 import { buildScheduleScore, compareScores, scoreVectorToNumber } from './score';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+// Monotonic counter for the generation log entries. Process-wide so ids stay
+// unique even if a worker ticks many entries during one run.
+let logSeq = 0;
+
+/**
+ * Emit a human-readable action line (like an installer step) so the UI log
+ * modal can show *what* the generator is doing, not only a percent. These are
+ * plain English strings produced on the worker (no i18n here); the UI renders
+ * them verbatim in the log list.
+ */
+function emitLog(
+  emit: (msg: WorkerMessage) => void,
+  level: GenerationLogEntry['level'],
+  message: string,
+  extra: Partial<Omit<GenerationLogEntry, 'id' | 'time' | 'level' | 'message'>> = {}
+): void {
+  emit({
+    type: 'LOG',
+    payload: {
+      id: ++logSeq,
+      time: Date.now(),
+      level,
+      message,
+      ...extra,
+    } as GenerationLogEntry,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Gap-optimization model (worker v0.2)
@@ -836,8 +864,12 @@ async function runGenerate(
     }
   }
 
+  const unassignedCount = conflicts.filter((c) => c.type === 'UNASSIGNED_HOURS').length;
+  emitLog(emit, 'info', `Initial placement: ${unitsAssigned}/${totalUnits} lessons placed${unassignedCount ? `, ${unassignedCount} unassigned` : '.'}`);
+
   autoResolveUnassigned(project, schedule, conflicts, nodeBudget);
 
+  emitLog(emit, 'info', 'Optimizing teacher gap distribution…');
   optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher, rng, optimizePasses, lockedSlots);
 
   const totalBatches = units.length;
@@ -1151,6 +1183,9 @@ export async function generateSemesterSchedules(
   const maxSpillPasses = unlimited(settings?.maxSpillPasses, 0, 4);
   const optimizePasses = unlimited(settings?.optimizePasses, 0, DEFAULT_OPTIMIZE_PASSES);
 
+  emitLog(emit, 'info', 'Preparing generation…');
+  emitLog(emit, 'step', `Mode: ${settings?.mode ?? 'runs'}, ${attemptsUnlimited ? 'unlimited' : attempts} attempt${attemptsUnlimited ? 's' : (attempts === 1 ? '' : 's')}, ${maxSpillPasses === Number.MAX_SAFE_INTEGER ? 'unlimited' : maxSpillPasses} spill passe${maxSpillPasses === 1 ? '' : 's'}, ${optimizePasses === Number.MAX_SAFE_INTEGER ? 'unlimited' : optimizePasses} optimize passe${optimizePasses === 1 ? '' : 's'}.`);
+
   // Rules with a FORBID_LESSON constraint have a fixed per-semester split that
   // the spillover must not move lessons across (respecting the forbid).
   const fixedRules = new Set(
@@ -1176,6 +1211,8 @@ export async function generateSemesterSchedules(
         if (msg.type === 'PROGRESS') {
           const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
           emit({ type: 'PROGRESS', payload: { progress: Math.round(progressBase + (p / 100) * progressSpan) } });
+        } else if (msg.type === 'LOG') {
+          emit(msg);
         }
       }, rng, fixedRules, optimizePasses, maxRearrangeNodes);
     };
@@ -1187,8 +1224,10 @@ export async function generateSemesterSchedules(
     };
 
     take(0.45);
+    emitLog(emit, 'step', 'Placing semester 1 lessons…');
     let semester1 = await runScaled(buildSemesterProject(project, 1, splits));
     take(0.45);
+    emitLog(emit, 'step', 'Placing semester 2 lessons…');
     let semester2 = await runScaled(buildSemesterProject(project, 2, splits));
 
     // Lessons that cannot be placed in one semester are moved to the other by
@@ -1218,6 +1257,7 @@ export async function generateSemesterSchedules(
       splits = nextSplits;
 
       take(0.05);
+      emitLog(emit, 'step', `Spill pass ${iter + 1}: redistributing unplaced lessons across semesters…`);
       semester1 = await runScaled(buildSemesterProject(project, 1, splits));
       take(0.05);
       semester2 = await runScaled(buildSemesterProject(project, 2, splits));
@@ -1270,6 +1310,7 @@ export async function generateSemesterSchedules(
       const candidate = await generateAttempt(0x9e3779b1 + ++attempt * 0x9e3779b1, 5, 85);
       const improved = consider(candidate);
       if (improved) {
+        emitLog(emit, 'success', `Attempt ${attempt} complete — new best (quality ${Math.round(best!.quality)}).`, { attempt, attempts: attempt, pct: Math.min(95, 5 + Math.floor((attempt / 20) * 90)) });
         const pct = Math.min(95, 5 + Math.floor((attempt / 20) * 90));
         emit({ type: 'PROGRESS', payload: { progress: pct, mode, bestQuality: Math.round(best!.quality) } });
         reported = pct;
@@ -1279,6 +1320,9 @@ export async function generateSemesterSchedules(
         reported = attempt;
       }
     }
+    emitLog(emit, 'success', (isCancelled?.() ?? false) && unlimitedTime
+      ? 'Stopped by user — returning best schedule found.'
+      : `Generation complete — best schedule selected after ${attempt} attempt${attempt === 1 ? '' : 's'} (quality ${Math.round(best!.quality)}).`, { attempt, attempts: attempt });
     emit({ type: 'PROGRESS', payload: { progress: 100, mode, bestQuality: Math.round(best!.quality) } });
     emit({
       type: 'RESULT',
@@ -1314,6 +1358,7 @@ export async function generateSemesterSchedules(
     const candidate = await generateAttempt((attempt + 1) * 0x9e3779b1, progressBase, progressSpan);
     consider(candidate);
     completed = attempt + 1;
+    emitLog(emit, 'success', `Attempt ${attempt + 1} of ${attemptsUnlimited ? attempt + 1 : attempts} complete — current best quality ${Math.round(best!.quality)}.`, { attempt: attempt + 1, attempts: attemptsUnlimited ? attempt + 1 : attempts });
     emit({
       type: 'PROGRESS',
       payload: {
@@ -1325,6 +1370,10 @@ export async function generateSemesterSchedules(
       },
     });
   }
+
+  emitLog(emit, 'success', attemptsUnlimited && (isCancelled?.() ?? false)
+    ? 'Stopped by user — returning best schedule found.'
+    : `Generation complete — best schedule selected after ${completed} attempt${completed === 1 ? '' : 's'} (quality ${Math.round(best!.quality)}).`, { attempt: completed, attempts: completed });
 
   emit({ type: 'PROGRESS', payload: { progress: 100, attempt: completed, attempts: completed, bestQuality: Math.round(best!.quality), mode } });
 
