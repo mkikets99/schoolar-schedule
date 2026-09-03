@@ -8,7 +8,7 @@
     "description": "Client-side school scheduling application",
     "repo": "https://github.com/mkikets99/schoolar-schedule",
     "branch": "main",
-    "latestCommit": "PLACEHOLDER - gap fill (parallel replacement) + real project perf",
+    "latestCommit": "7e61780 - feat(worker): parallel-replacement gap fill via direct single-lesson moves + real-project perf",
     "totalCommits": 107,
     "remote": "origin/main (up to date)",
     "untrackedFiles": [],
