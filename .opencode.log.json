@@ -8,11 +8,11 @@
     "description": "Client-side school scheduling application",
     "repo": "https://github.com/mkikets99/schoolar-schedule",
     "branch": "main",
-    "latestCommit": "43515c9 - Add -1 Unlimited to all generation params with user-stop support",
-    "totalCommits": 103,
+    "latestCommit": "PLACEHOLDER - gap fill (parallel replacement) + real project perf",
+    "totalCommits": 107,
     "remote": "origin/main (up to date)",
     "untrackedFiles": [],
-    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation; teacher maxGroups (co-teaching); generation log modal"
+    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation; teacher maxGroups (co-teaching); generation log modal; worker gap fill via direct single-lesson moves (parallel replacement), real-project generation now ~90s"
   },
   "stack": {
     "ui": "React 18 + Vite 4 + TypeScript 5",
@@ -140,6 +140,12 @@
   },
   "completedTasks": [
     {
+      "id": "v0.3.0-gap-fill-parallel-replacement",
+      "date": "2026-09-03",
+      "title": "Worker gap fill via direct single-lesson moves (parallel replacement) + real-project perf fix",
+      "body": "The same-day pair-swap (optimizeGaps) only fills a gap cell by swapping the unrelated occupant out, so a gap whose cell is free-for-the-teacher but whose occupant cannot swap is wrongly 'unplaceable'. Added directFillGaps/directFillDay (generator.ts): a cheap per-attempt pass that moves a gapped teacher's own same-day lesson straight into the hole while leaving the occupant (shared occupancy, one rebuild per pass), accepting only strict gap reductions and only non-conflicting moves (hard-capped passes<=16 / improvements<=schedule.length so '-1 Unlimited' cannot hang). Fixed an occupancy bug: slotFree's daily-cap (maxDailyByRule/autoMaxPerDay) check counted the moving lesson itself, wrongly rejecting same-day moves that keep the per-day count constant - slotFree now takes an excludeId to subtract the moving lesson. Removed the once-at-end deep cascade (cascadeFillGaps/applyFinalGapCascade) that made the real project take 300-415s and blow the 120s beforeAll timeout: realProject.test.ts now completes in ~66s standalone (was ~107s), full suite ~129s. On the real project (real_test.schoolproj) all unfilled gap slots are now curriculum_done/daily-cap etc. (no teacher-gap reasons); remaining unassigned count is only from genuinely over-constrained groups (10, 8-Б). New src/test/worker/gapFillDirect.test.ts (2 cases: gap fill with occupied-cell swap impossible, and no-op when every fill is group-clashed). Full suite 230 tests / 25 files green; npm run build green."
+    },
+    {
       "id": "generation-log-modal",
       "date": "2026-09-03",
       "title": "Generation log modal (installer-style action steps shown while generating)",
@@ -210,13 +216,13 @@
     "View/Edit toggling in ScheduleViewer (view mode currently re-renders edits)",
     "Edit teacher in schedule in InlineEditor (teacher-mode empty-edit issues)",
     "UI/UX polish: verify confirm-modal day-name translations, teacher-swap badge styling",
-    "Opportunity: apply depth-15 rearrange cascade at generation time to auto-resolve conflicts"
+    "100% completeness on real project: groups 10 and 8-Б are over-constrained (free slots < needed hours); needs a bounded cross-day blocker-displacement cascade or constraint loosening"
   ],
   "notes": [
     "Project is fully client-side, offline-first, runs on GitHub Pages",
     "All state persisted to IndexedDB with autosave",
     ".schoolproj files are JSON-based with schema versioning",
-    "2026-09-03: v0.3.0 - anytime optimizer, lexicographic scoring, worker pool, user-stop; 103 commits, all tests passing",
+    "2026-09-03: v0.3.0 - anytime optimizer, lexicographic scoring, worker pool, user-stop; gap fill via direct single-lesson moves (parallel replacement); real-project generation ~66s. 107 commits, all tests passing",
     "2026-09-02: force-insert + 15-swap rearrange cascade, edit-mode locks, worker pool parallelization",
     "2026-09-02: npm run lint is broken in this repo (eslint not in devDependencies and no eslint.config.*) - pre-existing",
     "Generator uses deterministic PRNG (mulberry32) for reproducible attempts",

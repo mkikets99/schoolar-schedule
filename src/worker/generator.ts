@@ -871,6 +871,10 @@ async function runGenerate(
 
   emitLog(emit, 'info', 'Optimizing teacher gap distribution…');
   optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher, rng, optimizePasses, lockedSlots);
+  // Cheap direct fill: move a gapped teacher's own lesson into a gap cell without
+  // forcing the unrelated occupant out (worker v0.3). Runs per attempt - it is
+  // O(schedule) per pass, so it stays invisible next to the single-swap search.
+  directFillGaps(schedule, project, optimizePasses);
 
   const totalBatches = units.length;
   return {
@@ -1059,6 +1063,101 @@ function optimizeGaps(
 
     if (!improved) break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Gap fill via single-lesson moves (worker v0.3 "parallel replacement").
+//
+// The single same-day pair-swap above (optimizeGaps) demands a strict TWO-way
+// swap: it only fills a gap cell by moving the gapped teacher's lesson in AND
+// swapping the unrelated occupant out. An "unplaceable gap" is exactly the case
+// where that swap is impossible even though the gap cell is genuinely placeable:
+// the gapped teacher's own lesson can simply be *moved into* the free-for-it
+// cell while the unrelated occupant stays put (different group, teacher, room).
+// This pass does exactly that cheap direct fill for every teacher-day gap. Every
+// accepted change moves the lesson within the same day (so rule day-counts are
+// unchanged) and is validated against the shared occupancy, so completeness is
+// never harmed - only gaps can go down.
+//
+// Termination: it is O(gap cells x same-day lessons) per teacher-day with no
+// search, so "-1 Unlimited" optimize passes cannot hang here.
+// ---------------------------------------------------------------------------
+
+function isLockedGapLesson(lesson: any, ctx: RearrangeContext): boolean {
+  return ctx.lockedSlots.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`);
+}
+
+export function directFillGaps(
+  schedule: any[],
+  project: ProjectState,
+  maxPasses: number
+): void {
+  if (schedule.length === 0) return;
+
+  const ctx = createRearrangeContext(project);
+  // Hard caps so even "-1 Unlimited" optimize passes terminate promptly.
+  const maxPassesHere = Math.min(maxPasses, 16);
+  const maxImprovements = Math.max(4, schedule.length);
+  let improvements = 0;
+
+  const teacherIds = [...new Set(schedule.map((l: any) => l.teacherId).filter(Boolean))] as string[];
+
+  // Build ONE occupancy per pass and reuse it for every teacher-day (a same-day
+  // move keeps the rule's day-count constant, so the shared occupancy correctly
+  // validates every direct fill). Rebuild when the schedule changes.
+  for (let pass = 0; pass < maxPassesHere; pass++) {
+    const occ = ctx.buildOccupancy(schedule, new Set());
+    let passImproved = false;
+    for (const tid of teacherIds) {
+      for (const day of DAYS) {
+        if (directFillDay(schedule, ctx, occ, tid, day)) {
+          passImproved = true;
+          improvements++;
+          if (improvements >= maxImprovements) return;
+          break;
+        }
+      }
+    }
+    if (!passImproved) break;
+  }
+}
+
+/**
+ * Try to remove one teacher-day gap by moving one of the teacher's own same-day
+ * lessons straight into a gap cell, leaving the unrelated occupant in place.
+ * Uses the prebuilt shared occupancy. Accepts one strict improvement.
+ */
+function directFillDay(schedule: any[], ctx: RearrangeContext, occ: any, tid: string, day: string): boolean {
+  const periods = dayPeriodsOf(schedule, tid, day).sort((a, b) => a - b);
+  if (periods.length < 2 || gapOfPeriods(periods) <= 0) return false;
+
+  // Small list of this teacher's same-day movable lessons (no full-schedule scan
+  // in the inner loop - that would dominate on large boards).
+  const movable: any[] = [];
+  for (const l of schedule) {
+    if (l.teacherId !== tid || l.day !== day) continue;
+    if (isLockedGapLesson(l, ctx)) continue;
+    if (hasSplitPartner(schedule, l) || hasDoublePartner(schedule, l)) continue;
+    movable.push(l);
+  }
+  if (movable.length === 0) return false;
+
+  for (let i = 1; i < periods.length; i++) {
+    for (let cell = periods[i - 1] + 1; cell < periods[i]; cell++) {
+      for (const lesson of movable) {
+        if (lesson.period === cell) continue;
+        const next = periods.filter((p) => p !== lesson.period);
+        next.push(cell);
+        next.sort((a, b) => a - b);
+        if (gapOfPeriods(next) - gapOfPeriods(periods) >= 0) continue;
+        if (!ctx.slotFree(occ, lesson, day, cell, lesson.teacherId, lesson.id)) continue;
+        lesson.day = day;
+        lesson.period = cell;
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 export function computeSemesterSplits(project: ProjectState): SemesterSplit[] {

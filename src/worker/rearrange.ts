@@ -65,7 +65,7 @@ export interface RearrangeContext {
   isBusy: (teacherId: string, day: string, period: number) => boolean;
   mainTeacherIdOf: (l: PlacableLesson) => string | undefined;
   buildOccupancy: (schedule: Lesson[], excludeIds: Set<string>) => SlotOccupancy;
-  slotFree: (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string) => boolean;
+  slotFree: (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string, excludeId?: string) => boolean;
   bestFreeSlot: (occ: SlotOccupancy, l: Lesson) => { day: string; period: number } | null;
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
   roomHasCapacity: (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number) => boolean;
@@ -181,7 +181,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     return occupants.has(groupId) || occupants.size < cap;
   };
 
-  const slotFree = (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string): boolean => {
+  const slotFree = (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string, excludeId?: string): boolean => {
     const cfg = groupConfig.get(l.groupId);
     const start = cfg?.periodStart ?? 1;
     const end = cfg?.periodEnd ?? 8;
@@ -204,7 +204,8 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     const cap = maxDailyByRule.get(l.ruleId);
     if (cap !== undefined) {
       const count = occ.ruleDayCount.get(l.ruleId)?.get(day) || 0;
-      if (count >= cap) return false;
+      const own = excludeId != null && excludeId === l.id && occ.ruleDayCount.get(l.ruleId)?.has(day) ? 1 : 0;
+      if (count - own >= cap) return false;
     }
     return true;
   };
