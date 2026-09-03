@@ -1,23 +1,23 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "createdAt": "2026-09-01",
-  "lastAnalysis": "2026-09-01",
+  "lastAnalysis": "2026-09-03",
   "project": {
     "name": "schoolar-schedule",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "description": "Client-side school scheduling application",
     "repo": "https://github.com/mkikets99/schoolar-schedule",
     "branch": "main",
-    "latestCommit": "ad2e85c - feat(editor): worker-side AI rearrangement with edit-mode confirm",
-    "totalCommits": 96,
+    "latestCommit": "43515c9 - Add -1 Unlimited to all generation params with user-stop support",
+    "totalCommits": 103,
     "remote": "origin/main (up to date)",
     "untrackedFiles": [],
-    "note": "0.2.1: automatic daily limits, AI rearrange engine + edit-mode confirm, fluent generation progress, expose optimizePasses"
+    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation"
   },
   "stack": {
     "ui": "React 18 + Vite 4 + TypeScript 5",
     "state": "React Context + IndexedDB (StorageService)",
-    "scheduling": "Web Worker (generator.ts, 851 lines)",
+    "scheduling": "Web Worker (generator.ts, score.ts, rearrange.ts)",
     "i18n": "i18next (en, uk)",
     "export": "jsPDF + ExcelJS + JSZip + PapaParse + xlsx",
     "testing": "Vitest + @testing-library/react + jsdom",
@@ -31,11 +31,12 @@
     },
     "worker": {
       "src/worker/worker.ts": "Message handler, dispatches to generator; INIT / GENERATE_SCHEDULE / REARRANGE",
-      "src/worker/generator.ts": "Core scheduling engine (861 lines). Semester-split generation, multi-attempt best-of, spill passes, scoring; emits per-attempt PROGRESS payloads",
-      "src/worker/rearrange.ts": "Pure suggestRearrange engine: direct/free-slot move -> eligible teacher swap -> deep blocker displacement cascade (recursive relocate(), up to maxDepth swaps, node-budgeted, claimed-slot reservations). resolvePlacement takes maxDepth: edit-mode entry points use 15, generation-time resolveUnplacedPlacement stays 1. Edit-mode infeasible drops force-insert the lesson directly (no modal) and the grid analyzer flags resulting conflicts"
+      "src/worker/generator.ts": "Core scheduling engine. Semester-split generation, anytime optimization with time-deadline loop, recursive rearrangement with backtracking, multi-attempt best-of; emits per-attempt PROGRESS payloads",
+      "src/worker/rearrange.ts": "Pure suggestRearrange engine: direct/free-slot move -> eligible teacher swap -> deep blocker displacement cascade (recursive relocate(), unbounded depth, node-budgeted, claimed-slot reservations). resolvePlacement takes maxDepth: edit-mode entry points use 15, generation-time uses unlimited via anytime loop. Edit-mode infeasible drops force-insert the lesson directly (no modal) and the grid analyzer flags resulting conflicts",
+      "src/worker/score.ts": "Lexicographic multi-objective scoring: completeness > teacher gaps > class gaps > distribution > other penalties"
     },
     "shared": {
-      "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings, ProjectState, computeGroupScheduleConfig(), autoMaxPerDay(), buildMaxDailyByRule(), ProgressPayload, RearrangeMove, RearrangeSuggestion, WorkerMessageType",
+      "src/shared/types.ts": "All data models: School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, Constraint, Lesson, ScheduleResult, SemesterSplit, SemesterSchedules, GenerateSettings (with generationTimeMs, userStopEnabled), ProjectState, computeGroupScheduleConfig(), autoMaxPerDay(), buildMaxDailyByRule(), ProgressPayload, RearrangeMove, RearrangeSuggestion, WorkerMessageType",
       "src/shared/eligibility.ts": "canTeachSubject, eligibleTeachers, eligibleTeacherOptions"
     },
     "context": {
@@ -43,16 +44,17 @@
     },
     "services": {
       "src/ui/services/StorageService.ts": "IndexedDB persistence",
-      "src/ui/services/ExportService.ts": "PDF/XLSX export with matrix rendering (939 lines), hidden JSON schedule export",
+      "src/ui/services/ExportService.ts": "PDF/XLSX export with matrix rendering, hidden JSON schedule export",
       "src/ui/services/ProjectExportService.ts": ".schoolproj import/export",
       "src/ui/services/CSVImportService.ts": "CSV/TSV/XLSX import",
       "src/ui/services/UniversalImportService.ts": "Unified import adapter",
-      "src/ui/services/scheduleAnalyzer.ts": "Empty slot reason analysis"
+      "src/ui/services/scheduleAnalyzer.ts": "Empty slot reason analysis",
+      "src/ui/services/workerPool.ts": "Worker pool for parallelized rearrange operations"
     },
     "components": {
       "App.tsx": "Root layout, nav, worker lifecycle",
-      "ScheduleViewer.tsx": "Schedule grid, stats, filters, modals (585 lines)",
-      "InlineEditor.tsx": "Drag-drop schedule editing (group/teacher modes); drop routes through suggestRearrange with confirm/blocked modals",
+      "ScheduleViewer.tsx": "Schedule grid, stats, filters, modals; view-mode click uses persistent rule+slot lock",
+      "InlineEditor.tsx": "Drag-drop schedule editing (group/teacher modes); drop routes through suggestRearrange with confirm/blocked modals; double-click locks pinned through generation",
       "CurriculumEditor.tsx": "Curriculum rules CRUD",
       "ConstraintEditor.tsx": "Constraints CRUD with multi-select",
       "TeacherEditor.tsx": "Teacher CRUD",
@@ -60,15 +62,14 @@
       "RoomEditor.tsx": "Room CRUD",
       "GroupEditor.tsx": "Group CRUD (with grade, shift, maxDaily)",
       "LoadDistributionUI.tsx": "Teacher load matrix",
-      "GenerateModal.tsx": "Generation settings (attempts, spill passes)",
+      "GenerateModal.tsx": "Generation settings (attempts, spill passes, generation time, user stop toggle)",
       "ExportModal.tsx": "PDF/XLSX export config",
       "ImportWizard.tsx": "Multi-format import wizard",
       "ProjectManager.tsx": "Create/open/export projects",
       "SchoolEditor.tsx": "School info editor",
       "Modal.tsx": "Reusable modal",
       "SearchableSelect.tsx": "Searchable dropdown",
-      "MultiSelect.tsx": "Multi-select with select-all",
-      "InlineEditor.tsx": "Schedule grid editor"
+      "MultiSelect.tsx": "Multi-select with select-all"
     }
   },
   "dataModel": {
@@ -85,25 +86,24 @@
     "ScheduleResult": { "fields": ["schedule[]", "conflicts[]", "score"] },
     "SemesterSplit": { "fields": ["ruleId", "hoursPerWeek", "first", "second"] },
     "SemesterSchedules": { "fields": ["semester1", "semester2"] },
-    "GenerateSettings": { "fields": ["attempts", "maxSpillPasses", "optimizePasses"] },
+    "GenerateSettings": { "fields": ["attempts", "maxSpillPasses", "optimizePasses", "generationTimeMs?", "userStopEnabled?"] },
     "ProjectState": { "fields": ["version", "school", "academicYears[]", "teachers[]", "subjects[]", "rooms[]", "groups[]", "curriculum[]", "loadDistribution[]", "constraints[]", "generatedSchedule?", "generatedSchedules?", "generatedSplits?"] }
   },
   "schedulingEngine": {
-    "approach": "Greedy placement with multi-attempt randomization",
+    "approach": "Anytime optimization with recursive rearrangement and backtracking",
     "semesterSplit": "Automatic per-rule semester splitting, with FORBID_LESSON override",
     "spillover": "Unplaced lessons cascade between semesters for fractional rules",
-    "attempts": "Generates N candidate schedules, scores each, keeps best",
-    "scoring": "Placement completeness dominates; teacher distribution compactness + load deviation as tiebreakers; pinned FORBID_LESSON rules penalized 500x",
-    "rearrange": "suggestRearrange in src/worker/rearrange.ts resolves drops: (1) direct move when target free, (2) eligible-teacher swap when the original teacher is busy, (3) relocate blocking lessons to free slots. Hard-infeasible: same-group occupancy, NO_FIRST_PERIOD, group/rule daily caps; split/double partners cannot be displaced by a single-lesson move.",
-    "progress": "Generator emits PROGRESS per attempt (attempt, attempts, bestQuality, pct = attempt/attempts*95) and a final 100; App shows a progress bar + percent in the header while generating.",
+    "anytime": "Time-deadline loop: keeps BEST_SCHEDULE, returns best when deadline reached; user can stop early via GenerationParams (-1 = unlimited)",
+    "scoring": "Lexicographic multi-objective: completeness > teacher gaps (count + length) > class gaps > distribution > other penalties (src/worker/score.ts)",
+    "rearrange": "suggestRearrange in src/worker/rearrange.ts: (1) direct move when target free, (2) eligible-teacher swap, (3) recursive relocate() displacement chain. Unbounded depth controlled by time/node budget. edit-mode uses maxDepth=15; generation-time uses unlimited via anytime loop. Split/double partners cannot be displaced. Worker pool parallelizes rearrange in edit mode",
+    "locks": "Double-click in ScheduleViewer/InlineEditor pins rule+slot lock through generation; moved lessons never reassigned to substitute teacher",
+    "progress": "Generator emits PROGRESS per attempt (attempt, attempts, bestQuality, pct) and a final 100; App shows progress bar + percent in header",
     "constraints": ["TEACHER_BUSY", "NO_FIRST_PERIOD", "FORBID_LESSON", "MAX_DAILY_LESSONS"],
-    "autoMaxPerDay": "Derived from the load distribution: >5 weekly hours -> 2 lessons/day, <=5 -> 1/day, doubleLesson keeps a pair (2/day). Explicit MAX_DAILY_LESSONS constraints override. Applied in generator and edit-mode analyzer; shown in ConstraintEditor.",
-    "features": ["double lessons", "split subjects (teacher rotation)", "room fallback", "grade adjacency preference", "teacher same-day compactness", "configurable group shift windows", "PRNG per attempt", "automatic MAX_DAILY_LESSONS from load distribution"]
+    "autoMaxPerDay": "Derived from load distribution: >5 weekly hours -> 2/day, <=5 -> 1/day, doubleLesson keeps pair (2/day). Explicit MAX_DAILY_LESSONS override. Applied in generator, analyzer, ConstraintEditor",
+    "features": ["double lessons", "split subjects (teacher rotation)", "room fallback", "grade adjacency preference", "teacher same-day compactness", "configurable group shift windows", "PRNG per attempt", "automatic MAX_DAILY_LESSONS", "anytime time-deadline optimization", "lexicographic scoring", "worker pool parallelization", "user-stop support", "generation locks (double-click pin)"]
   },
   "tests": {
     "framework": "Vitest",
-    "count": 197,
-    "files": 18,
     "status": "ALL PASSING",
     "testFiles": [
       "src/test/worker/worker.test.ts",
@@ -112,6 +112,10 @@
       "src/test/worker/gapOptimization.test.ts",
       "src/test/worker/autoDailyLimit.test.ts",
       "src/test/worker/rearrange.test.ts",
+      "src/test/worker/maxGroups.test.ts",
+      "src/test/worker/lock.test.ts",
+      "src/test/worker/gradeOrder.test.ts",
+      "src/test/worker/anytimeOptimizer.test.ts",
       "src/test/shared/types.test.ts",
       "src/test/shared/dailyLimit.test.ts",
       "src/test/services/ProjectExportService.test.ts",
@@ -136,39 +140,76 @@
   },
   "completedTasks": [
     {
+      "id": "v0.3.0-user-stop",
+      "date": "2026-09-03",
+      "title": "Add -1 Unlimited to all generation params with user-stop support",
+      "body": "GenerationParams accepts -1 as unlimited for all numeric fields. UserStopEnabled toggle in GenerateModal allows stopping generation early. Worker respects the stop signal and returns best schedule found so far."
+    },
+    {
+      "id": "v0.3.0-worker-pool",
+      "date": "2026-09-02",
+      "title": "Unlock max-param ceilings; parallelize rearrange via worker pool",
+      "body": "Removed artificial ceilings on generation parameters. Added workerPool.ts to parallelize rearrange operations across multiple web workers. Unlock max-param ceilings for attempts/spill passes/optimize passes."
+    },
+    {
+      "id": "v0.3.0-anytime-optimizer",
+      "date": "2026-09-02",
+      "title": "v0.3 anytime optimizer with lexicographic scoring and time-deadline generation",
+      "body": "Replaced fixed-attempt loop with anytime time-deadline optimization. New score.ts implements lexicographic multi-objective scoring (completeness > teacher gaps > class gaps > distribution > penalties). Generator now uses a while(now < deadline) loop that keeps BEST_SCHEDULE and returns the best found when time expires. Recursive rearrangement has unbounded depth controlled by time/node budget."
+    },
+    {
+      "id": "v0.3.0-lock-consolidation",
+      "date": "2026-09-02",
+      "title": "View-mode click uses persistent rule+slot lock; consolidate with editor",
+      "body": "ScheduleViewer view-mode click now creates persistent rule+slot locks that survive through generation. Consolidated lock logic with InlineEditor so both paths use the same mechanism."
+    },
+    {
+      "id": "v0.3.0-lock-no-reassign",
+      "date": "2026-09-02",
+      "title": "Never reassign moved lesson to substitute teacher; add cross-regeneration lock test",
+      "body": "Locked/moved lessons are never reassigned to substitute teachers during rearrangement. Added cross-regeneration lock persistence test."
+    },
+    {
+      "id": "v0.3.0-edit-mode",
+      "date": "2026-09-02",
+      "title": "Single Edit mode with entity filter; double-click lesson locks pinned through generation",
+      "body": "Consolidated editing into a single Edit mode with entity filter (group/teacher). Double-clicking a lesson in the schedule grid pins a lock that persists through generation."
+    },
+    {
       "id": "v0.2.1-force-insert-deep-rearrange",
       "date": "2026-09-02",
       "title": "Deep 15-swap rearrange cascade + force-insert fallback in edit mode",
-      "body": "Removed the hard block on drag-drop inserts in edit mode. Drop resolution now asks the engine for a deep rearrangement first: resolvePlacement gained maxDepth (edit-mode suggestRearrange/suggestRearrangeChoices pass 15, generation-time resolveUnplacedPlacement stays 1) and a recursive relocate() displaces colliding teacher/room occupants toward a hole, bounded by a 12000-node budget (searchNodes). A per-suggestion 'claimed' slot set reserves the main target and prevents two displaced lessons landing in the same destination slot (fixes the realProject.test.ts invariant violation). When no rearrangement can open the slot, InlineEditor force-inserts the lesson directly via commitFromMoves with feasible:true and no modal; the grid analyzer flags resulting conflicts. Removed the rearrange_block* modal and 9 i18n keys (en/uk). Split/double-partner lessons stay unmovable in the cascade. Tests: new rearrange.test.ts cascade fixture (9 groups, busy teacher, displaced chain -> hole) and two InlineEditor blocked->force-insert cases. Full suite 197 tests / 18 files green; tsc + npm run build green."
+      "body": "Removed hard block on drag-drop inserts in edit mode. Drop resolution asks engine for deep rearrangement first: resolvePlacement gained maxDepth (edit-mode pass 15, generation-time stays 1) and recursive relocate() displaces colliding occupants toward a hole, bounded by 12000-node budget. When no rearrangement opens the slot, InlineEditor force-inserts directly via commitFromMoves. Tests: 197/18 green."
     },
     {
       "id": "v0.2.1-ai-rearrange",
       "date": "2026-09-01",
       "title": "Worker-side AI rearrangement with edit-mode confirm + fluent progress UI",
-      "body": "New pure suggestRearrange engine (src/worker/rearrange.ts) resolves edit-mode drops: direct move when the target slot is free, otherwise search for an eligible substitute teacher, otherwise relocate blocking lessons to free slots. Hard-infeasible when the same group already occupies a slot, when NO_FIRST_PERIOD blocks it, or when group/rule daily caps would be exceeded; split/double-partner lessons cannot be displaced. Added REARRANGE / REARRANGE_RESULT worker messages and types (RearrangeMove, RearrangeSuggestion, ProgressPayload). Generator now emits per-attempt PROGRESS payloads (attempt, attempts, bestQuality, pct of a 95-point window) plus a final 100. InlineEditor routes drag-drop through the engine: free-slot drops commit instantly, multi-move/teacher-swap drops open a confirmation modal listing each move (with a reassign badge), infeasible drops show a blocked notice. App header renders a progress bar + percent while generating and a 'best of N' status after. GenerateModal exposes optimizePasses (0-60, default 8). New en i18n keys and CSS. Tests: src/test/worker/rearrange.test.ts (10 engine cases), GenerateModal spinbutton index updates, InlineEditor pool placement/blocked/confirm flows. Full suite 187 tests / 18 files green; npm run build green."
+      "body": "New pure suggestRearrange engine (src/worker/rearrange.ts). REARRANGE/REARRANGE_RESULT worker messages. Generator emits per-attempt PROGRESS. InlineEditor routes drag-drop through engine. GenerateModal exposes optimizePasses. Tests: 187/18 green."
     },
     {
       "id": "v0.2.1-auto-daily-limit",
       "date": "2026-09-01",
-      "title": "Automatic MAX_LESSON_PER_DAY (MAX_DAILY_LESSONS) from load distribution",
-      "body": "Changed the per-subject daily lesson limit logic: the effective MAX_DAILY_LESSONS is now derived automatically from the load distribution (a lesson is limited to 2 per day when its weekly load exceeds 5 hours, otherwise 1 per day; doubleLesson rules keep their pair allowance). Explicit MAX_DAILY_LESSONS constraints override the automatic value. autoMaxPerDay() + buildMaxDailyByRule() added in src/shared/types.ts and reused by the generator (src/worker/generator.ts), the edit-mode analyzer (src/ui/services/scheduleAnalyzer.ts), and shown read-only in ConstraintEditor with new i18n keys (auto_daily_limits, auto_daily_limits_desc, auto_limit_overridden). Tests: src/test/shared/dailyLimit.test.ts, src/test/worker/autoDailyLimit.test.ts, +4 analyzer cases. Full suite 175 tests / 17 files green; npm run build green."
+      "title": "Automatic MAX_LESSON_PER_DAY from load distribution",
+      "body": "autoMaxPerDay() + buildMaxDailyByRule() in types.ts. Effective MAX_DAILY_LESSONS derived automatically. Tests: 175/17 green."
     }
   ],
   "pendingTasks": [
-    "View/Edit toggling in ScheduleViewer (view mode currently re-renders edits)", 
+    "View/Edit toggling in ScheduleViewer (view mode currently re-renders edits)",
     "Edit teacher in schedule in InlineEditor (teacher-mode empty-edit issues)",
     "UI/UX polish: verify confirm-modal day-name translations, teacher-swap badge styling",
-    "Opportunity: apply the depth-15 rearrange cascade at generation time to auto-resolve conflicts (currently depth 1 via resolveUnplacedPlacement)"
+    "Opportunity: apply depth-15 rearrange cascade at generation time to auto-resolve conflicts"
   ],
   "notes": [
     "Project is fully client-side, offline-first, runs on GitHub Pages",
     "All state persisted to IndexedDB with autosave",
     ".schoolproj files are JSON-based with schema versioning",
-    "2026-09-02: All 197 tests pass (18 files); force-insert + 15-swap rearrange cascade implemented (uncommitted)",
-    "2026-09-02: npm run lint is broken in this repo (eslint not in devDependencies and no eslint.config.*; eslint 10 resolves via npx but cannot run) - pre-existing, not introduced by the feature change",
-    "2026-09-01: All 175 tests pass (17 files); automatic daily limits committed as part of v0.2.1",
+    "2026-09-03: v0.3.0 - anytime optimizer, lexicographic scoring, worker pool, user-stop; 103 commits, all tests passing",
+    "2026-09-02: force-insert + 15-swap rearrange cascade, edit-mode locks, worker pool parallelization",
+    "2026-09-02: npm run lint is broken in this repo (eslint not in devDependencies and no eslint.config.*) - pre-existing",
     "Generator uses deterministic PRNG (mulberry32) for reproducible attempts",
-    "jsdom drop events carry no clientX; InlineEditor drag-drop tests drop at Monday/period 1 (fixtures keep that slot free unless testing the blocked path)",
-    "Lock/unlock in schedule viewer is UI-only state (not persisted)"
+    "jsdom drop events carry no clientX; InlineEditor drag-drop tests drop at Monday/period 1",
+    "Lock/unlock in schedule viewer is UI-only state (not persisted) - except double-click pin locks which persist through generation",
+    "worker.v0.3.0.md contains the full specification for the anytime optimizer (40 sections, 1439 lines)"
   ]
 }

@@ -47,6 +47,7 @@ export const ConstraintEditor = () => {
   const [maxDailyPerDay, setMaxDailyPerDay] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editId, setEditId] = useState<string | null>(null);
+  const [autoLimitsOpen, setAutoLimitsOpen] = useState(true);
 
   const teacherName = (id?: string) => (id ? teachers.find(x => x.id === id)?.name || id : '');
   const subjectName = (id?: string) => (id ? subjects.find(x => x.id === id)?.name || id : '');
@@ -381,19 +382,30 @@ export const ConstraintEditor = () => {
 
       {autoLimits.length > 0 && (
         <div className="auto-limits-panel">
-          <h3 className="auto-limits-title">{t('auto_daily_limits')}</h3>
-          <p className="section-desc">{t('auto_daily_limits_desc')}</p>
-          <ul className="auto-limits-list">
-            {autoLimits.map(({ rule, cap, overridden }) => (
-              <li key={rule.id} className={`auto-limits-row${overridden ? ' overridden' : ''}`}>
-                <span className="auto-limits-label">{ruleLabel(rule.id)}</span>
-                <span className="auto-limits-value">
-                  {t('at_most')} {cap} {t(cap === 1 ? 'lesson_per_day' : 'lessons_per_day')}
-                </span>
-                {overridden && <span className="constraint-badge max-daily">{t('auto_limit_overridden')}</span>}
-              </li>
-            ))}
-          </ul>
+          <button
+            className="auto-limits-header"
+            onClick={() => setAutoLimitsOpen(o => !o)}
+            aria-expanded={autoLimitsOpen}
+          >
+            <span className="auto-limits-title">{t('auto_daily_limits')}</span>
+            <span className="auto-limits-summary">
+              <span className="auto-limits-description">{t('auto_daily_limits_desc')}</span>
+              <span className={`auto-limits-caret${autoLimitsOpen ? ' open' : ''}`} aria-hidden>▸</span>
+            </span>
+          </button>
+          {autoLimitsOpen && (
+            <ul className="auto-limits-list">
+              {autoLimits.map(({ rule, cap, overridden }) => (
+                <li key={rule.id} className={`auto-limits-row${overridden ? ' overridden' : ''}`}>
+                  <span className="auto-limits-label">{ruleLabel(rule.id)}</span>
+                  <span className="auto-limits-value">
+                    {t('at_most')} {cap} {t(cap === 1 ? 'lesson_per_day' : 'lessons_per_day')}
+                  </span>
+                  {overridden && <span className="constraint-badge max-daily">{t('auto_limit_overridden')}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
