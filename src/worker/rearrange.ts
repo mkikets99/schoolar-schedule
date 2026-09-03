@@ -21,7 +21,7 @@ interface BusyRule {
 }
 
 interface SlotOccupancy {
-  teacher: Map<string, Set<string>>; // teacherId -> "day|period"
+  teacher: Map<string, Map<string, Set<string>>>; // teacherId -> "day|period" -> groupIds
   room: Map<string, Map<string, Set<string>>>; // roomId -> "day|period" -> groupIds
   group: Map<string, Set<string>>; // groupId -> "day|period"
   groupDayCount: Map<string, Map<string, number>>; // groupId -> day -> count
@@ -69,6 +69,7 @@ export interface RearrangeContext {
   bestFreeSlot: (occ: SlotOccupancy, l: Lesson) => { day: string; period: number } | null;
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
   roomHasCapacity: (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number) => boolean;
+  maxGroupsByTeacher: Map<string, number>;
 }
 
 export function createRearrangeContext(project: ProjectState, semester?: 'semester1' | 'semester2'): RearrangeContext {
@@ -89,6 +90,12 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
   const maxGroupsByRoom = new Map<string, number>();
   for (const room of project.rooms || []) {
     maxGroupsByRoom.set(room.id, Math.max(1, room.maxGroups ?? 1));
+  }
+
+  // How many groups a teacher may work with in the same slot. Undefined = 1.
+  const maxGroupsByTeacher = new Map<string, number>();
+  for (const teacher of project.teachers || []) {
+    maxGroupsByTeacher.set(teacher.id, Math.max(1, teacher.maxGroups ?? 1));
   }
 
   // Lessons pinned against movement: identified by rule + slot (semester-scoped
@@ -116,15 +123,16 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
       if (!m.has(id)) m.set(id, new Set());
       m.get(id)!.add(key);
     };
+    const pushGroup = (m: Map<string, Map<string, Set<string>>>, id: string, key: string, groupId: string) => {
+      if (!m.has(id)) m.set(id, new Map());
+      if (!m.get(id)!.has(key)) m.get(id)!.set(key, new Set());
+      m.get(id)!.get(key)!.add(groupId);
+    };
     for (const l of schedule) {
       if (excludeIds.has(l.id)) continue;
       const key = `${l.day}|${l.period}`;
-      if (l.teacherId) push(occ.teacher, l.teacherId, key);
-      if (l.roomId) {
-        if (!occ.room.has(l.roomId)) occ.room.set(l.roomId, new Map());
-        if (!occ.room.get(l.roomId)!.has(key)) occ.room.get(l.roomId)!.set(key, new Set());
-        occ.room.get(l.roomId)!.get(key)!.add(l.groupId);
-      }
+      if (l.teacherId) pushGroup(occ.teacher, l.teacherId, key, l.groupId);
+      if (l.roomId) pushGroup(occ.room, l.roomId, key, l.groupId);
       push(occ.group, l.groupId, key);
       if (!occ.groupDayCount.has(l.groupId)) occ.groupDayCount.set(l.groupId, new Map());
       const gd = occ.groupDayCount.get(l.groupId)!;
@@ -180,7 +188,12 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     if (period < start || period > end) return false;
     const teacher = teacherId || l.teacherId || mainTeacherIdOf(l);
     if (occ.group.get(l.groupId)?.has(`${day}|${period}`)) return false;
-    if (teacher && occ.teacher.get(teacher)?.has(`${day}|${period}`)) return false;
+    if (teacher) {
+      const teacherOccupants = occ.teacher.get(teacher)?.get(`${day}|${period}`);
+      if (teacherOccupants && teacherOccupants.size >= (maxGroupsByTeacher.get(teacher) ?? 1) && !teacherOccupants.has(l.groupId)) {
+        return false;
+      }
+    }
     if (l.roomId && !roomHasCapacity(occ, l.roomId, l.groupId, day, period)) return false;
     if (teacher && isBusy(teacher, day, period)) return false;
     if (
@@ -231,6 +244,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     bestFreeSlot,
     isSplitOrDoublePartner,
     roomHasCapacity,
+    maxGroupsByTeacher,
   };
 }
 

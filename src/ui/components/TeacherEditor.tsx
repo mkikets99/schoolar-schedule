@@ -16,7 +16,7 @@ export const TeacherEditor = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [newTeacher, setNewTeacher] = useState({ name: '', shortName: '' });
+  const [newTeacher, setNewTeacher] = useState({ name: '', shortName: '', maxGroups: 1 });
   const [subjectFilter, setSubjectFilter] = useState('');
 
   const { query, setQuery, sort, toggleSort, rows: displayedTeachers, total, shown } = useTableControls<Teacher>({
@@ -31,6 +31,7 @@ export const TeacherEditor = () => {
       switch (key) {
         case 'name': return teacher.name;
         case 'shortName': return teacher.shortName || '';
+        case 'maxGroups': return teacher.maxGroups ?? 1;
         case 'subjects': return teacher.subjects.length;
         default: return teacher.name;
       }
@@ -46,11 +47,12 @@ export const TeacherEditor = () => {
       id: crypto.randomUUID(),
       name: newTeacher.name.trim(),
       shortName: newTeacher.shortName.trim() || undefined,
+      maxGroups: Math.max(1, Math.floor(newTeacher.maxGroups || 1)),
       subjects: [],
     };
 
     updateTeachers([...teachers, teacher]);
-    setNewTeacher({ name: '', shortName: '' });
+    setNewTeacher({ name: '', shortName: '', maxGroups: 1 });
     setIsModalOpen(false);
   };
 
@@ -68,7 +70,8 @@ export const TeacherEditor = () => {
     const imported: Teacher[] = data.map((row: any) => ({
       id: crypto.randomUUID(),
       name: row.Name || row.name || '',
-      shortName: row.ShortName || row.shortName || row.Initials || '',
+      shortName: row.ShortName || row.shortName || row.Initials || row.initials || '',
+      maxGroups: parseInt(row.MaxGroups || row.maxGroups || row['Max Groups'] || row['max groups']) || 1,
       subjects: [],
     })).filter(t => t.name);
     
@@ -121,6 +124,15 @@ export const TeacherEditor = () => {
             onChange={(e) => setNewTeacher({ ...newTeacher, shortName: e.target.value })}
           />
         </FormField>
+        <FormField label={t('max_groups_teacher')}>
+          <p className="section-desc" style={{ marginTop: '0.25rem' }}>{t('max_groups_teacher_desc')}</p>
+          <input 
+            type="number" 
+            value={newTeacher.maxGroups}
+            onChange={(e) => setNewTeacher({ ...newTeacher, maxGroups: parseInt(e.target.value) || 1 })}
+            min="1"
+          />
+        </FormField>
       </Modal>
 
       <div className="table-toolbar">
@@ -141,6 +153,7 @@ export const TeacherEditor = () => {
           <tr>
             <SortableTh label={t('name')} sortKey="name" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('short_name')} sortKey="shortName" sort={sort} onSort={toggleSort} />
+            <SortableTh label={t('max_groups_teacher')} sortKey="maxGroups" sort={sort} onSort={toggleSort} />
             <SortableTh label={t('subjects')} sortKey="subjects" sort={sort} onSort={toggleSort} />
             <th style={{ width: '100px' }}>{t('actions')}</th>
           </tr>
@@ -163,6 +176,15 @@ export const TeacherEditor = () => {
                 />
               </td>
               <td>
+                <input 
+                  type="number" 
+                  value={teacher.maxGroups ?? 1} 
+                  onChange={(e) => handleUpdateTeacher(teacher.id, { maxGroups: parseInt(e.target.value) || 1 })}
+                  min="1"
+                  title={t('max_groups_teacher_desc')}
+                />
+              </td>
+              <td>
                 <MultiSelect
                   value={teacher.subjects}
                   onChange={(subjects) => handleUpdateTeacher(teacher.id, { subjects })}
@@ -177,7 +199,7 @@ export const TeacherEditor = () => {
           ))}
           {displayedTeachers.length === 0 && (
             <tr>
-              <td colSpan={4} className="empty-row">{teachers.length === 0 ? t('no_data', { type: 'teacher' }) : t('no_results')}</td>
+              <td colSpan={5} className="empty-row">{teachers.length === 0 ? t('no_data', { type: 'teacher' }) : t('no_results')}</td>
             </tr>
           )}
         </tbody>

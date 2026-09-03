@@ -303,10 +303,19 @@ async function runGenerate(
     maxGroupsByRoom.set(room.id, Math.max(1, room.maxGroups ?? 1));
   }
 
-  const teacherBusy = new Set<string>();
+  // A teacher may also supervise several groups in one slot (e.g. a co-teacher).
+  // maxGroups defaults to 1 when unset, matching the historical strict
+  // one-group-per-teacher-per-slot behaviour.
+  const maxGroupsByTeacher = new Map<string, number>();
+  for (const teacher of project.teachers || []) {
+    maxGroupsByTeacher.set(teacher.id, Math.max(1, teacher.maxGroups ?? 1));
+  }
+
   const groupBusy = new Set<string>();
   // roomId-slotKey -> set of groupIds currently in that room at that slot.
   const roomBusy = new Map<string, Set<string>>();
+  // teacherId-slotKey -> set of groupIds this teacher teaches at that slot.
+  const teacherOccupancy = new Map<string, Set<string>>();
 
   const splitKeys = new Set<string>();
   const seen = new Map<string, CurriculumRule[]>();
@@ -509,7 +518,15 @@ async function runGenerate(
     const lockedRuleSlot = lockedSlotsByRule.get(lesson.ruleId);
     if (lockedRuleSlot && lockedRuleSlot.has(slotKey) && !allowLockedRuleSlot) return false;
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
-    if (lesson.teacherId && teacherBusy.has(`${lesson.teacherId}-${slotKey}`)) return false;
+    // A teacher may teach up to maxGroups groups in the same slot. Its own
+    // group already occupying the slot (e.g. a split/double partner) is always
+    // allowed; a new group needs spare capacity.
+    if (lesson.teacherId) {
+      const occupants = teacherOccupancy.get(`${lesson.teacherId}-${slotKey}`);
+      if (occupants && occupants.size >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1) && !occupants.has(lesson.groupId)) {
+        return false;
+      }
+    }
     if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
     const cfg = groupConfig.get(lesson.groupId);
     if (isForbiddenFirstPeriod(lesson, period, cfg?.periodStart ?? 1)) return false;
@@ -550,7 +567,11 @@ async function runGenerate(
     const groupSlotKey = `${lesson.groupId}-${slotKey}`;
     const firstInSlot = !groupBusy.has(groupSlotKey);
     groupBusy.add(groupSlotKey);
-    if (lesson.teacherId) teacherBusy.add(`${lesson.teacherId}-${slotKey}`);
+    if (lesson.teacherId) {
+      const tk = `${lesson.teacherId}-${slotKey}`;
+      if (!teacherOccupancy.has(tk)) teacherOccupancy.set(tk, new Set());
+      teacherOccupancy.get(tk)!.add(lesson.groupId);
+    }
     if (roomId) {
       const rk = `${roomId}-${slotKey}`;
       if (!roomBusy.has(rk)) roomBusy.set(rk, new Set());
@@ -817,7 +838,7 @@ async function runGenerate(
 
   autoResolveUnassigned(project, schedule, conflicts, nodeBudget);
 
-  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, rng, optimizePasses, lockedSlots);
+  optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher, rng, optimizePasses, lockedSlots);
 
   const totalBatches = units.length;
   return {
@@ -842,17 +863,26 @@ function slotFreeForSwap(
   teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
   noFirstRules: { subjectId: string; groupId?: string }[],
   groupConfig: Map<string, GroupScheduleConfig>,
-  maxGroupsByRoom: Map<string, number>
+  maxGroupsByRoom: Map<string, number>,
+  maxGroupsByTeacher: Map<string, number>
 ): boolean {
   const roomOccupants = new Set<string>();
+  const teacherOccupantsByGroup = new Set<string>();
   for (const other of schedule) {
     if (other.id === excludeId) continue;
     if (other.day !== day || other.period !== period) continue;
     if (other.groupId === lesson.groupId) return false;
-    if (lesson.teacherId && other.teacherId === lesson.teacherId) return false;
+    if (lesson.teacherId && other.teacherId === lesson.teacherId) teacherOccupantsByGroup.add(other.groupId);
     if (lesson.roomId && other.roomId === lesson.roomId) roomOccupants.add(other.groupId);
   }
   if (lesson.roomId && roomOccupants.size >= (maxGroupsByRoom.get(lesson.roomId) ?? 1)) return false;
+  if (
+    lesson.teacherId &&
+    teacherOccupantsByGroup.size >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1) &&
+    !teacherOccupantsByGroup.has(lesson.groupId)
+  ) {
+    return false;
+  }
   if (lesson.teacherId && isBusyRule(teacherBusyRules, lesson.teacherId, day, period)) return false;
   const cfg = groupConfig.get(lesson.groupId);
   if (cfg) {
@@ -900,14 +930,15 @@ function canSameDaySwap(
   teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[],
   noFirstRules: { subjectId: string; groupId?: string }[],
   groupConfig: Map<string, GroupScheduleConfig>,
-  maxGroupsByRoom: Map<string, number>
+  maxGroupsByRoom: Map<string, number>,
+  maxGroupsByTeacher: Map<string, number>
 ): boolean {
   if (a.day !== b.day || a.period === b.period) return false;
   if (hasDoublePartner(schedule, a) || hasDoublePartner(schedule, b)) return false;
   if (hasSplitPartner(schedule, a) || hasSplitPartner(schedule, b)) return false;
   // a -> b's slot, b -> a's slot (same day, group/room/teacher slots checked).
-  if (!slotFreeForSwap(schedule, a, a.day, b.period, b.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) return false;
-  if (!slotFreeForSwap(schedule, b, a.day, a.period, a.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) return false;
+  if (!slotFreeForSwap(schedule, a, a.day, b.period, b.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher)) return false;
+  if (!slotFreeForSwap(schedule, b, a.day, a.period, a.id, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher)) return false;
   return true;
 }
 
@@ -930,6 +961,7 @@ function optimizeGaps(
   noFirstRules: { subjectId: string; groupId?: string }[],
   groupConfig: Map<string, GroupScheduleConfig>,
   maxGroupsByRoom: Map<string, number>,
+  maxGroupsByTeacher: Map<string, number>,
   rng: (() => number) | undefined,
   maxPasses: number,
   lockedSlots: Set<string> = new Set()
@@ -976,7 +1008,7 @@ function optimizeGaps(
           if (!bLesson || bLesson.teacherId === entry.tid || isLocked(bLesson)) continue;
           for (const target of [pPrev, pCur]) {
             const aLesson = schedule.find(l => l.teacherId === entry.tid && l.day === entry.day && l.period === target);
-            if (!aLesson || isLocked(aLesson) || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom)) continue;
+            if (!aLesson || isLocked(aLesson) || !canSameDaySwap(schedule, aLesson, bLesson, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher)) continue;
             const delta = swapGapDelta(schedule, aLesson, bLesson);
             if (bestSwap === null || delta < bestSwap.delta) {
               bestSwap = { a: aLesson, b: bLesson, delta };

@@ -12,7 +12,7 @@
     "totalCommits": 103,
     "remote": "origin/main (up to date)",
     "untrackedFiles": [],
-    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation"
+    "note": "0.3.0: anytime optimizer with lexicographic scoring, time-deadline generation, worker pool parallelization, user-stop support, edit-mode locks pinned through generation; teacher maxGroups (co-teaching) field"
   },
   "stack": {
     "ui": "React 18 + Vite 4 + TypeScript 5",
@@ -139,6 +139,12 @@
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "completedTasks": [
+    {
+      "id": "teacher-maxgroups-coteaching",
+      "date": "2026-09-03",
+      "title": "Teacher max groups allowed (co-teaching / supervising several classes at once)",
+      "body": "Added a numeric maxGroups field to Teacher (default 1) limiting how many groups a teacher can work with in the same time slot, mirroring the existing Room.maxGroups. Generator: replaced the flat teacherBusy set with teacherOccupancy (teacherId-slotKey -> Set<groupId>), so canPlace and slotFreeForSwap now allow a teacher to supervise multiple groups in one slot up to their cap while still rejecting a new group when the cap is reached. Rearrange: SlotOccupancy.teacher became teacherId -> slot -> groupIds, and slotFree + the displacement cascade respect maxGroupsByTeacher. UI: TeacherEditor modal + table column (sortable), CSV import (importTeachersCSV + TeacherEditor.handleImport) reads maxGroups column. i18n keys max_groups_teacher / max_groups_teacher_desc (en/uk). Tests: new src/test/worker/maxTeacherGroups.test.ts (3 cases). Full suite 226 tests / 23 files green; npm run build green."
+    },
     {
       "id": "v0.3.0-user-stop",
       "date": "2026-09-03",

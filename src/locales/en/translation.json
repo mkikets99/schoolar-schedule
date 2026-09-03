@@ -47,6 +47,8 @@
   "new_room": "Add New Room",
   "room_name": "Room Name / Number",
   "max_groups": "Max Groups",
+  "max_groups_teacher": "Max Groups Allowed",
+  "max_groups_teacher_desc": "Limits how many groups the teacher can work with in the same time slot. Default: 1.",
   "create_room": "Create Room",
   "no_rooms": "No rooms added yet.",
   "new_group": "Add New Group",

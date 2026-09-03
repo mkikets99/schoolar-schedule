@@ -11,6 +11,7 @@ export const importTeachersCSV = (file: File): Promise<Teacher[]> => {
           id: crypto.randomUUID(),
           name: row.name || row.Name || '',
           shortName: row.shortName || row.ShortName || row.initials || '',
+          maxGroups: parseInt(row.maxGroups || row['max groups'] || row['Max Groups']) || 1,
           subjects: [],
         })).filter(t => t.name);
         resolve(teachers);

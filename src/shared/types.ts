@@ -21,6 +21,13 @@ export interface Teacher {
   shortName?: string;
   subjects: string[]; // Subject IDs
   color?: string;
+  /**
+   * How many groups this teacher may work with in the same time slot
+   * simultaneously. A single teacher usually supervises one group at a time
+   * (default), but a co-teacher or hall supervisor may handle several classes
+   * at once. Undefined means 1.
+   */
+  maxGroups?: number;
 }
 
 export interface Subject {
