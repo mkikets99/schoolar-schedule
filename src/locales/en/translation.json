@@ -207,6 +207,8 @@
   "stopped": "stopped",
   "stopping": "Stopping…",
   "clear_schedule": "Clear Schedule",
+  "undo_generation": "Undo Generation",
+  "undo_generation_done": "Generation undone — previous schedule restored",
   "confirm_clear_schedule": "Are you sure you want to clear the generated schedule? This cannot be undone.",
   "build_date": "Build: {{date}}",
   "export_xlsx": "Export as Excel (.xlsx)",

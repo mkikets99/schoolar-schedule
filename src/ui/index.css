@@ -583,6 +583,20 @@ main {
   font-size: 0.8rem;
 }
 
+.undo-btn {
+  background-color: #4a72d0;
+  color: white;
+  border: none;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.undo-btn:hover {
+  background-color: #3c5fb6;
+}
+
 .empty-row {
   text-align: center;
   padding: 3rem !important;

@@ -13,7 +13,7 @@ import { ScheduleViewer } from './components/ScheduleViewer';
 import { ConstraintEditor } from './components/ConstraintEditor';
 import { GenerateModal } from './components/GenerateModal';
 import { Modal } from './components/Modal';
-import { GenerateSettings, GenerationLogEntry } from '../shared/types';
+import { GenerateSettings, GenerationLogEntry, SemesterSchedules, SemesterSplit, ScheduleResult } from '../shared/types';
 import { workerPool, PoolJob } from './services/workerPool';
 import { exportProject } from './services/ProjectExportService';
 import { exportScheduleJSON } from './services/ExportService';
@@ -21,7 +21,7 @@ import './index.css';
 
 function AppContent() {
   const { t, i18n } = useTranslation();
-  const { project, isLoading, updateGeneratedSchedules, updateGeneratedSplits, clearGeneratedSchedule } = useProject();
+  const { project, isLoading, updateGeneratedSchedules, updateGeneratedSplits, clearGeneratedSchedule, setProject } = useProject();
   const [workerStatus, setWorkerStatus] = useState<string>(t('initializing'));
   const [workerVersion, setWorkerVersion] = useState<string>('');
   const [workerBuildVersion, setWorkerBuildVersion] = useState<string>('');
@@ -31,6 +31,7 @@ function AppContent() {
   const [logsOpen, setLogsOpen] = useState(false);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const [editorSession, setEditorSession] = useState(0);
+  const [undoSnapshot, setUndoSnapshot] = useState<{ schedules?: SemesterSchedules; splits?: SemesterSplit[]; legacy?: ScheduleResult } | null>(null);
   const activeJobRef = useRef<PoolJob | null>(null);
 
   // Auto-scroll the log list to the newest entry while the modal is open.
@@ -76,6 +77,14 @@ function AppContent() {
 
   const handleGenerateSchedule = (settingsOverride?: GenerateSettings) => {
     if (!project) return;
+    // Snapshot the current schedule so the user can undo a (re)generation after
+    // it completes or is stopped. The previous schedule is cleared below before
+    // the worker runs; this snapshot is what gets restored on undo.
+    setUndoSnapshot({
+      schedules: project.generatedSchedules,
+      splits: project.generatedSplits,
+      legacy: project.generatedSchedule,
+    });
     clearGeneratedSchedule();
     setWorkerStatus(t('starting_gen'));
     setGenerating(true);
@@ -160,11 +169,25 @@ function AppContent() {
   const handleClearSchedule = () => {
     if (confirm(t('confirm_clear_schedule'))) {
       clearGeneratedSchedule();
+      setUndoSnapshot(null);
       setEditorSession(s => s + 1);
       setWorkerStatus(t('worker_ready'));
       setGenerating(false);
       setProgress(null);
     }
+  };
+
+  const handleUndoGeneration = () => {
+    if (!undoSnapshot || !project) return;
+    setProject({
+      ...project,
+      generatedSchedules: undoSnapshot.schedules,
+      generatedSplits: undoSnapshot.splits,
+      generatedSchedule: undoSnapshot.legacy,
+    });
+    setUndoSnapshot(null);
+    setEditorSession(s => s + 1);
+    setWorkerStatus(t('undo_generation_done'));
   };
 
   const handleReset = () => {
@@ -308,6 +331,9 @@ function AppContent() {
                         {hasAnySchedule(project) && (
                           <button onClick={handleClearSchedule} className="delete-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>{t('clear_schedule')}</button>
                         )}
+                        {canUndoGeneration(undoSnapshot) && !generating && (
+                          <button onClick={handleUndoGeneration} className="undo-btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }} title={t('undo_generation')}>{t('undo_generation')}</button>
+                        )}
                         <button onClick={handleGenerateClick} className="generate-btn-small" title={t('generate_btn_hint')}>{hasAnySchedule(project) ? t('regenerate') : t('generate')}</button>
                       </div>
                     </div>
@@ -369,6 +395,16 @@ function hasAnySchedule(project: ReturnType<typeof useProject>['project']): bool
     return project.generatedSchedules.semester1.schedule.length > 0 || project.generatedSchedules.semester2.schedule.length > 0;
   }
   return (project.generatedSchedule?.schedule?.length || 0) > 0;
+}
+
+function canUndoGeneration(
+  undo: { schedules?: SemesterSchedules; splits?: SemesterSplit[]; legacy?: ScheduleResult } | null
+): boolean {
+  if (!undo) return false;
+  if (undo.schedules) {
+    return undo.schedules.semester1.schedule.length > 0 || undo.schedules.semester2.schedule.length > 0;
+  }
+  return (undo.legacy?.schedule?.length || 0) > 0;
 }
 
 function levelIcon(level: GenerationLogEntry['level']): string {
