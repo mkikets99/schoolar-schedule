@@ -6,11 +6,13 @@ import {
   RearrangeBlockReason,
   RearrangeMove,
   RearrangeSuggestion,
+  SemesterSchedules,
   Teacher,
   buildMaxDailyByRule,
   computeGroupScheduleConfig,
 } from '../shared/types';
 import { eligibleTeachers } from '../shared/eligibility';
+import { buildScheduleScore } from './score';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -70,6 +72,10 @@ export interface RearrangeContext {
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
   roomHasCapacity: (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number) => boolean;
   maxGroupsByTeacher: Map<string, number>;
+  /** The originating project, retained so edit/generation-time rearrange can
+   *  score the resulting schedule through `buildScheduleScore` (v4-32) instead
+   *  of returning the first feasible cascade. */
+  project: ProjectState;
 }
 
 export function createRearrangeContext(project: ProjectState, semester?: 'semester1' | 'semester2'): RearrangeContext {
@@ -246,6 +252,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     isSplitOrDoublePartner,
     roomHasCapacity,
     maxGroupsByTeacher,
+    project,
   };
 }
 
@@ -339,6 +346,10 @@ function resolvePlacement(
     scored.sort((a, b) => a.score - b.score);
 
     for (const slot of scored) {
+      // A slot may have been claimed by a sub-cascade while this precomputed
+      // ranked list was being built; never double-claim it (fixes multi-lesson
+      // piles when a relocation chain overlaps its own targets).
+      if (claimed.has(`${slot.day}|${slot.period}`)) continue;
       if (slotFree(occBase, o, slot.day, slot.period)) {
         const next = new Set(excluded);
         next.add(o.id);
@@ -376,6 +387,7 @@ function resolvePlacement(
       if (!ok) continue;
       const occAfter = buildOccupancy(schedule, nextExcluded);
       if (!slotFree(occAfter, o, slot.day, slot.period)) continue;
+      if (claimed.has(`${slot.day}|${slot.period}`)) continue;
       claimed.add(`${slot.day}|${slot.period}`);
       return {
         moves: [{ lessonId: o.id, toDay: slot.day, toPeriod: slot.period }, ...displaced],
@@ -518,6 +530,64 @@ function resolvePlacement(
   return candidates;
 }
 
+function scoreVectorForSort(score: ReturnType<typeof buildScheduleScore>): number[] {
+  return [
+    score.unscheduledLessons,
+    score.pinnedUnassigned,
+    score.dailyCompactness,
+    score.longGapPenalty,
+    score.sparseDayPenalty,
+    score.subjectDistributionPenalty,
+    score.parallelizationPenalty,
+    score.ageShiftPenalty,
+    score.roomStabilityPenalty,
+    score.assignmentMovementPenalty,
+    score.minorPreferencePenalty,
+  ];
+}
+
+/**
+ * Build a SemesterSchedules wrapper for scoring one candidate editing pass. The
+ * edited semester gets the post-move schedule; the paired semester is left as a
+ * copy (candidates share identical completeness there, so ranking is driven by
+ * the affected semester's soft metrics - v4-32).
+ */
+function wrappedSchedule(schedule: Lesson[], candidate: RearrangeSuggestion): SemesterSchedules {
+  const next = schedule.map((l) => ({ ...l }));
+  const byId = new Map(next.map((l) => [l.id, l]));
+  for (const m of candidate.moves) {
+    const lesson = byId.get(m.lessonId);
+    if (!lesson) continue;
+    lesson.day = m.toDay;
+    lesson.period = m.toPeriod;
+    if (m.teacherId) lesson.teacherId = m.teacherId;
+  }
+  return {
+    semester1: { schedule: next, conflicts: [], score: 1 },
+    semester2: { schedule: [...schedule], conflicts: [], score: 1 },
+  };
+}
+
+/**
+ * Rank a set of candidate resolutions by the resulting full-schedule score.
+ * Smaller score vector wins (fewer/no conflicts first, then daily compactness,
+ * then the rest). When scores tie, the original engine order is kept (stable).
+ */
+function rankCandidates(
+  project: ProjectState,
+  schedule: Lesson[],
+  candidates: RearrangeSuggestion[]
+): RearrangeSuggestion[] {
+  return candidates.slice().sort((a, b) => {
+    const va = scoreVectorForSort(buildScheduleScore(wrappedSchedule(schedule, a), [], project));
+    const vb = scoreVectorForSort(buildScheduleScore(wrappedSchedule(schedule, b), [], project));
+    for (let i = 0; i < va.length; i++) {
+      if (va[i] !== vb[i]) return va[i] - vb[i];
+    }
+    return 0;
+  });
+}
+
 /**
  * Return every distinct way the rearrange engine could place a lesson at the
  * target. Each entry is a complete, constraint-valid resolution (the main move
@@ -533,7 +603,11 @@ export function suggestRearrangeChoices(
 ): RearrangeSuggestion[] {
   const lesson = schedule.find((l) => l.id === lessonId);
   if (!lesson) return [{ feasible: false, moves: [], reason: 'NO_SPACE' }];
-  return resolvePlacement(createRearrangeContext(project, semester), schedule, lesson, target, true, DEFAULT_NODE_BUDGET);
+  return rankCandidates(
+    project,
+    schedule,
+    resolvePlacement(createRearrangeContext(project, semester), schedule, lesson, target, true, DEFAULT_NODE_BUDGET)
+  );
 }
 
 /**
@@ -574,7 +648,10 @@ export function suggestRearrange(
     !reassignTeacherId,
     DEFAULT_NODE_BUDGET
   );
-  return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
+  // Return the best cascade by the resulting ScheduleScore, never just the
+  // first feasible one (v4-30/v4-32).
+  const ranked = rankCandidates(project, schedule, choices);
+  return ranked[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }
 
 /**
@@ -595,5 +672,51 @@ export function resolveUnplacedPlacement(
   // Generation-time auto-resolve: a missing budget means "no explicit count
   // limit" (spec §22) - unbounded search, bounded only by the caller deadline.
   const choices = resolvePlacement(ctx, schedule, lesson, target, false, nodeBudget ?? Infinity);
-  return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
+  // Rank by the resulting schedule score (v4-32): the main lesson is added to
+  // the affected semester and moves are applied before scoring.
+  const project = ctx.project;
+  if (choices.length === 0) return { feasible: false, moves: [], reason: 'NO_SPACE' };
+  const main = choices.find((c) => c.feasible);
+  if (!main) return choices[0] ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
+  const addLesson = (s: Lesson[], m: RearrangeMove): Lesson[] => {
+    const exists = s.find((l) => l.id === m.lessonId);
+    if (exists) return s;
+    return [
+      ...s,
+      {
+        id: m.lessonId,
+        ruleId: lesson.ruleId,
+        groupId: lesson.groupId,
+        subjectId: lesson.subjectId,
+        teacherId: m.teacherId ?? lesson.teacherId,
+        roomId: lesson.roomId,
+        day: m.toDay,
+        period: m.toPeriod,
+      },
+    ];
+  };
+  const wrap = (candidate: RearrangeSuggestion): Lesson[] => {
+    let next = [...schedule];
+    for (const mv of candidate.moves) {
+      const idx = next.findIndex((l) => l.id === mv.lessonId);
+      if (idx >= 0) {
+        next = next.map((l) => (l.id === mv.lessonId ? { ...l, day: mv.toDay, period: mv.toPeriod } : l));
+      } else {
+        next = addLesson(next, mv);
+      }
+    }
+    return next;
+  };
+  const ranked = choices.slice().sort((a, b) => {
+    const schedules1: SemesterSchedules = { semester1: { schedule: wrap(a), conflicts: [], score: 1 }, semester2: { schedule: [], conflicts: [], score: 1 } };
+    const schedules2: SemesterSchedules = { semester1: { schedule: wrap(b), conflicts: [], score: 1 }, semester2: { schedule: [], conflicts: [], score: 1 } };
+    const va = scoreVectorForSort(buildScheduleScore(schedules1, [], project));
+    const vb = scoreVectorForSort(buildScheduleScore(schedules2, [], project));
+    for (let i = 0; i < va.length; i++) {
+      if (va[i] !== vb[i]) return va[i] - vb[i];
+    }
+    return 0;
+  });
+  const best = ranked.find((c) => c.feasible) ?? ranked[0];
+  return best ?? { feasible: false, moves: [], reason: 'NO_SPACE' };
 }

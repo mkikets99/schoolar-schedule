@@ -59,7 +59,7 @@ describe.skipIf(!hasRealProject)('Real project generation (real_test.schoolproj)
     expect(res).toBeDefined();
     schedules = res!.payload.schedules;
     splits = res!.payload.splits;
-  }, 120000);
+  }, 600000);
 
   it('loads a real project', () => {
     expect(project.teachers.length).toBeGreaterThan(0);

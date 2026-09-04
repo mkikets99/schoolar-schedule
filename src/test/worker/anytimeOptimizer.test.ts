@@ -70,7 +70,7 @@ describe('lexicographic schedule score (worker v0.3)', () => {
     const t = buildScheduleScore(tight, [], project);
     const l = buildScheduleScore(loose, [], project);
     expect(t.unscheduledLessons).toBe(l.unscheduledLessons);
-    expect(t.teacherTotalGapLength).toBeLessThan(l.teacherTotalGapLength);
+    expect(t.dailyCompactness).toBeLessThan(l.dailyCompactness);
     expect(compareScores(t, l)).toBeGreaterThan(0);
   });
 
@@ -184,5 +184,20 @@ describe('unlimited (-1) generation', () => {
     const result = messages.find((m) => m.type === 'RESULT');
     expect(result).toBeDefined();
     expect(result!.payload.schedules.semester1.schedule.length).toBe(5);
+  });
+});
+
+describe('v0.4 lexicographic schedule score', () => {
+  const mk = (schedule: any[], conflicts: any[] = []): SemesterSchedules => ({
+    semester1: { schedule, conflicts, score: 1 },
+    semester2: { schedule: [], conflicts: [], score: 1 },
+  });
+
+  it('levels are lexicographic: completeness beats room stability beats minor', () => {
+    const project = makeProject([{ id: 'c1', groupId: 'g1', subjectId: 'subj-math', hoursPerWeek: 5, teacherId: 't1' }]);
+    const complete = buildScheduleScore(mk([lesson(1, 'Monday', 'c1'), lesson(2, 'Monday', 'c1'), lesson(3, 'Monday', 'c1')]), [], project);
+    // Incomplete but untouched rooms / zero moves: must still lose on LEVEL 1.
+    const incomplete = buildScheduleScore(mk([lesson(1, 'Monday', 'c1')], [{ type: 'UNASSIGNED_HOURS', ruleId: 'c1', missing: 2 }]), [], project);
+    expect(compareScores(complete, incomplete)).toBeGreaterThan(0);
   });
 });

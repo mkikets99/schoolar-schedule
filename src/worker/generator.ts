@@ -275,13 +275,21 @@ export async function generateSchedule(project: ProjectState, emit: (msg: Worker
   });
 }
 
+// Perturbation profiles (worker v0.4 spec §36): each full attempt runs with a
+// different tie-break bias so the search explores distinct regions while every
+// candidate is still compared by the same canonical ScheduleScore.
+export type AttemptProfile = 'conservative' | 'parallel' | 'compact' | 'age' | 'random';
+
+export const ATTEMPT_PROFILES: AttemptProfile[] = ['conservative', 'parallel', 'compact', 'age', 'random'];
+
 async function runGenerate(
   project: ProjectState,
   emit: (msg: WorkerMessage) => void,
   rng?: () => number,
   pinnedRuleIds?: Set<string>,
   optimizePasses = DEFAULT_OPTIMIZE_PASSES,
-  nodeBudget?: number
+  nodeBudget?: number,
+  profile: AttemptProfile = 'conservative'
 ): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = DAYS;
 
@@ -463,7 +471,63 @@ async function runGenerate(
     teacherDailyCounts.set(t.id, days.map(() => 0));
   }
 
+  // v4-34: most-constrained-first heuristic ordering. Signals are static (computed
+  // once per generation run, not per attempt): fewer feasible slots, fewer room
+  // options, a teacher shared across many rules, higher weekly frequency, doubles
+  // and locked-slot rules all place earlier so the greedy engine builds around the
+  // tightest items first. This is a heuristic only - placement still validates hard
+  // invariants, and final choice stays lexicographic on ScheduleScore.
+  const teacherRuleCounts = new Map<string, number>();
+  for (const rule of project.curriculum || []) {
+    if (!rule.teacherId) continue;
+    teacherRuleCounts.set(rule.teacherId, (teacherRuleCounts.get(rule.teacherId) || 0) + 1);
+  }
+  const ruleLockCounts = new Map<string, number>();
+  for (const lock of project.lockedLessons || []) {
+    if (!lock.ruleId || !DAYS.includes(lock.day) || !(lock.period >= 1 && lock.period <= 12)) continue;
+    ruleLockCounts.set(lock.ruleId, (ruleLockCounts.get(lock.ruleId) || 0) + 1);
+  }
+  const constraintOf = new Map<string, { slots: number; rooms: number; share: number; freq: number; locks: number }>();
+  for (const unit of units) {
+    const cfg = groupConfig.get(unit.groupId);
+    const periodStart = cfg?.periodStart ?? 1;
+    const hi = (cfg?.periodEnd ?? 12) - (unit.type === 'double' ? 1 : 0);
+    let slots = 0;
+    for (const day of DAYS) {
+      for (let p = periodStart; p <= hi; p++) {
+        if (
+          p === periodStart &&
+          unit.lessons.some((l) => noFirstRules.some((r) => r.subjectId === l.subjectId && (!r.groupId || r.groupId === unit.groupId)))
+        ) {
+          continue;
+        }
+        if (unit.lessons.some((l) => l.teacherId && isBusyRule(teacherBusyRules, l.teacherId, day, p))) continue;
+        if (unit.type === 'double' && unit.lessons.some((l) => l.teacherId && isBusyRule(teacherBusyRules, l.teacherId, day, p + 1))) continue;
+        slots++;
+      }
+    }
+    const rooms = new Set<string>();
+    for (const lesson of unit.lessons) {
+      for (const r of roomCandidatesFor(lesson, DAYS[0], periodStart)) rooms.add(r);
+      if (lesson.roomId) rooms.add(lesson.roomId);
+    }
+    const share = Math.max(...unit.lessons.map((l) => (l.teacherId ? teacherRuleCounts.get(l.teacherId) || 0 : 0)));
+    const locks = Math.max(...unit.lessons.map((l) => ruleLockCounts.get(l.ruleId) || 0));
+    constraintOf.set(unit.lessons[0].id, { slots, rooms: rooms.size, share, freq: unit.lessons.length, locks });
+  }
+
   units.sort((a, b) => {
+    // v4-34 uses *genuinely* tight units first (few feasible slots, few room
+    // options, many locked slots). Soft signals (shared teacher, weekly frequency)
+    // stay below the legacy grade->daily-limit->double chain so pre-existing
+    // grade-ordering behaviour is preserved for otherwise-unconstrained boards.
+    const ca = constraintOf.get(a.lessons[0].id);
+    const cb = constraintOf.get(b.lessons[0].id);
+    if (ca && cb) {
+      if (ca.slots !== cb.slots) return ca.slots - cb.slots;
+      if (ca.rooms !== cb.rooms) return ca.rooms - cb.rooms;
+      if (ca.locks !== cb.locks) return cb.locks - ca.locks;
+    }
     const ga = groupGrade.get(a.groupId) ?? 0;
     const gb = groupGrade.get(b.groupId) ?? 0;
     if (ga !== gb) return ga - gb;
@@ -479,18 +543,25 @@ async function runGenerate(
     const aa = a.lessons[0]?.teacherId || '';
     const ab = b.lessons[0]?.teacherId || '';
     if (aa !== ab) return aa.localeCompare(ab);
+    // v4-34 soft tie-breaks: a teacher shared across many rules and higher weekly
+    // frequency place first within an otherwise-identical bucket.
+    if (ca && cb) {
+      if (ca.share !== cb.share) return cb.share - ca.share;
+      if (ca.freq !== cb.freq) return cb.freq - ca.freq;
+    }
     return a.lessons[0]?.id.localeCompare(b.lessons[0]?.id || '') || 0;
   });
 
-  // Units are processed by the priority chain above (grade ascending, then tighter
-  // daily limits, then doubles); the per-attempt shuffle only scrambles the order
-  // *within* a fully-tied bucket so every attempt still satisfies those priorities.
+  // Units are processed by the priority chain above; the per-attempt shuffle only
+  // scrambles the order *within* a fully-tied bucket so every attempt still
+  // satisfies those priorities.
   const shuffleTieBuckets = (arr: SchedulingUnit[], rngFn: () => number): SchedulingUnit[] => {
     const out: SchedulingUnit[] = [];
     let run: SchedulingUnit[] = [];
     let lastKey = '';
     for (const u of arr) {
-      const key = `${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}`;
+      const c = constraintOf.get(u.lessons[0].id);
+      const key = `${c ? `${c.slots}|${c.rooms}|${c.locks}|${c.share}|${c.freq}` : ''}|${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}|${groupLessonTotals.get(u.groupId) || 0}|${u.lessons[0]?.teacherId || ''}`;
       if (key !== lastKey && run.length > 0) {
         shuffleInPlace(run, rngFn);
         out.push(...run);
@@ -534,6 +605,42 @@ async function runGenerate(
     return false;
   }
 
+  // Ordered room candidates for a lesson in a given slot, respecting the
+  // layered room policy (worker v0.4 §18-§19): required > preferred >
+  // acceptable > fallback > the rule's legacy roomId. A candidate room only
+  // counts when it still has capacity for the group at the slot (or the group is
+  // already in it - a split/double partner re-using the room).
+  function roomCandidatesFor(lesson: LessonStub, day: string, period: number): string[] {
+    const slotKey = `${day}-${period}`;
+    const capOk = (roomId: string) => {
+      const occupants = roomBusy.get(`${roomId}-${slotKey}`);
+      if (!occupants) return true;
+      return occupants.has(lesson.groupId) || occupants.size < (maxGroupsByRoom.get(roomId) ?? 1);
+    };
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (id?: string) => {
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        if (capOk(id)) out.push(id);
+      }
+    };
+    const pushAll = (ids?: string[]) => {
+      for (const id of ids || []) push(id);
+    };
+
+    const lessonRule = project.curriculum.find((r) => r.id === lesson.ruleId);
+    const rp = lessonRule?.roomPolicy;
+    if (rp) {
+      pushAll(rp.required);
+      pushAll(rp.preferred);
+      pushAll(rp.acceptable);
+      pushAll(rp.fallback);
+    }
+    push(lesson.roomId); // legacy required room always remains a candidate
+    return out;
+  }
+
   function isForbiddenFirstPeriod(lesson: LessonStub, period: number, periodStart: number): boolean {
     if (period !== periodStart) return false;
     return noFirstRules.some(r =>
@@ -564,22 +671,25 @@ async function runGenerate(
       const counts = ruleDailyCounts.get(lesson.ruleId)!;
       if (counts[di] >= cap) return false;
     }
-    // A room assigned to a rule is forced: only a room that has already reached
-    // its simultaneous-group cap (maxGroups) in this slot rejects the placement
-    // - never silently substitute another room. The same group re-entering a
-    // room it already occupies (a split partner) is always allowed.
-    if (lesson.roomId) {
-      const occupants = roomBusy.get(`${lesson.roomId}-${slotKey}`);
-      if (occupants && occupants.size >= (maxGroupsByRoom.get(lesson.roomId) ?? 1) && !occupants.has(lesson.groupId)) {
-        return false;
-      }
+    // Room policy (worker v0.4 §19): if ANY room in the layered policy (or the
+    // legacy forced room) is free in this slot, the placement is valid - do not
+    // rebuild the schedule just because the preferred room is occupied. A room
+    // that only lacks capacity rejects; the same group re-entering a room it
+    // already occupies (a split partner) is always allowed.
+    if (roomCandidatesFor(lesson, day, period).length === 0) {
+      // No room candidate at all only when the rule has no room AND policy is
+      // empty, which is a valid "no room" placement.
+      const lessonRule = project.curriculum.find((r) => r.id === lesson.ruleId);
+      const hasRoomSetup = !!lesson.roomId || !!lessonRule?.roomPolicy;
+      if (hasRoomSetup) return false;
     }
     return true;
   }
 
   function placeLesson(lesson: LessonStub, day: string, period: number) {
     const slotKey = `${day}-${period}`;
-    const roomId = lesson.roomId;
+    // Choose the best available room for this slot per the layered policy.
+    const roomId = roomCandidatesFor(lesson, day, period)[0] ?? lesson.roomId;
 
     schedule.push({
       id: lesson.id,
@@ -699,6 +809,15 @@ async function runGenerate(
     return result;
   }
 
+  function classDayPeriods(groupId: string, day: string): number[] {
+    const out: number[] = [];
+    for (const lesson of schedule) {
+      if (lesson.groupId === groupId && lesson.day === day) out.push(lesson.period);
+    }
+    out.sort((a, b) => a - b);
+    return out;
+  }
+
   function gradeAdjacencyScore(unit: SchedulingUnit, day: string, period: number): number {
     const grade = groupGrade.get(unit.groupId);
     if (grade === undefined) return 0;
@@ -739,17 +858,93 @@ async function runGenerate(
     return delta;
   }
 
+  // Class-side analogue of placementGapDelta: how much a candidate slot changes
+  // the *group's* daily free-hour count (worker v0.4 §5.2). Same-day class gaps
+  // finally become a real objective during slot ordering.
+  function classGapDelta(unit: SchedulingUnit, day: string, period: number): number {
+    const current = classDayPeriods(unit.groupId, day);
+    const extra = unit.type === 'double' ? [period, period + 1] : [period];
+    const merged = [...new Set([...current, ...extra])].sort((a, b) => a - b);
+    return gapOfPeriods(merged) - gapOfPeriods(current);
+  }
+
+  // Subject-spread preference (worker v0.4 §9): prefer a slot on a day where the
+  // rule already has lessons (spreads out) over a day where it does not yet
+  // have lessons that would cram the week.
+  function subjectSpreadScore(unit: SchedulingUnit, day: string): number {
+    const today = days.indexOf(day);
+    let score = 0;
+    for (const lesson of schedule) {
+      if (lesson.ruleId === unit.lessons[0]?.ruleId) {
+        score += today === days.indexOf(lesson.day) ? 2 : -1;
+      }
+    }
+    return score;
+  }
+
   function getOrderedPeriods(unit: SchedulingUnit, day: string): number[] {
     const base = getPeriodsForGroup(unit.groupId);
     return base.slice().sort((a, b) => {
       const ga = placementGapDelta(unit, day, a);
       const gb = placementGapDelta(unit, day, b);
       if (ga !== gb) return ga - gb;
+      const ca = classGapDelta(unit, day, a);
+      const cb = classGapDelta(unit, day, b);
+      if (ca !== cb) return ca - cb;
       const sa = gradeAdjacencyScore(unit, day, a);
       const sb = gradeAdjacencyScore(unit, day, b);
       if (sa !== sb) return sb - sa;
+      // Profile-driven tie-break (v4-38): parallel prefers to mirror the day a
+      // sibling parallel set already uses; compact leans toward period 1 (early);
+      // age leans toward the band's preferred window; random just jitters.
+      if (profile === 'parallel') {
+        const pa = parallelMirrorScore(unit, day, a);
+        const pb = parallelMirrorScore(unit, day, b);
+        if (pa !== pb) return pb - pa;
+      }
+      if (profile === 'age') {
+        const aa = agePreferenceScore(unit, a);
+        const ab = agePreferenceScore(unit, b);
+        if (aa !== ab) return ab - aa;
+      }
+      if (profile === 'compact') {
+        const esA = Math.abs(a - (groupConfig.get(unit.groupId)?.periodStart ?? 1));
+        const esB = Math.abs(b - (groupConfig.get(unit.groupId)?.periodStart ?? 1));
+        if (esA !== esB) return esA - esB;
+      }
+      if (profile === 'random') return (rng ? rng() - 0.5 : 0);
       return (a - b) + (rng ? rng() - 0.5 : 0);
     });
+  }
+
+  // How well a slot aligns with the age/shift band for the unit's grade
+  // (v4-38 'age' profile; soft heuristic only, never a hard rule).
+  function agePreferenceScore(unit: SchedulingUnit, period: number): number {
+    const policy = project.schedulePolicy?.ageGroups;
+    if (!policy || policy.length === 0) return 0;
+    const grade = groupGrade.get(unit.groupId);
+    if (grade === undefined) return 0;
+    for (const band of policy) {
+      if (!band.grades.includes(grade)) continue;
+      const { min, max } = band.preferredPeriods;
+      return period >= min && period <= max ? 1 : 0;
+    }
+    return 0;
+  }
+
+  // Parallel mirroring (v4-38 'parallel' profile): a slot scores higher when a
+  // sibling parallel group already has the same subject that day (soft).
+  function parallelMirrorScore(unit: SchedulingUnit, day: string, period: number): number {
+    const pg = (project.parallelGroups || []).find((p) => p.groupIds.includes(unit.groupId));
+    if (!pg) return 0;
+    const siblings = pg.groupIds.filter((g) => g !== unit.groupId).map((g) => new Set(
+      schedule.filter((l) => l.groupId === g && l.day === day && l.period === period).map((l) => l.subjectId)
+    ));
+    let score = 0;
+    for (const lesson of unit.lessons) {
+      if (siblings.some((s) => s.has(lesson.subjectId))) score++;
+    }
+    return score;
   }
 
   // Locked lessons are pinned before greedy placement: each lock consumes one
@@ -820,7 +1015,7 @@ async function runGenerate(
       }
       return {
         day, index: di,
-        need: (targets[di] - counts[di]) + bestDelta + teacherDayBonus(unit, di),
+        need: (targets[di] - counts[di]) + bestDelta + teacherDayBonus(unit, di) + subjectSpreadScore(unit, day),
       };
     });
     dayScores.sort((a, b) => (b.need - a.need) || ((rng ? rng() : 0) - 0.5));
@@ -1120,11 +1315,436 @@ export function directFillGaps(
           passImproved = true;
           improvements++;
           if (improvements >= maxImprovements) return;
+          // The shared occupancy is stale once a lesson has moved; rebuild it
+          // before the next candidate so slotFree() never validates against a
+          // pre-move picture (one move per pass keeps it correct).
           break;
         }
       }
+      if (passImproved) break;
     }
     if (!passImproved) break;
+  }
+}
+
+/**
+ * v4-36 / v4-37: score-gated local search over the whole semester pair. Guided
+ * operators run in strict ScheduleScore LEVEL order (completeness, teacher+class
+ * compactness, long gaps, sparse days, subject distribution, parallelization,
+ * age/shift, room/movement stability). Every candidate is validated against the
+ * hard invariants first, then accepted only when the canonical lexicographic
+ * score strictly improves *up to the operator's own level* - so a step can never
+ * worsen a higher level, while lower levels are free to move (spec §38-f). The
+ * operator list repeats for a few rounds, making the step a bounded multi-step
+ * search that escapes placement-time local optima (spec §39).
+ */
+export function localSearch(
+  project: ProjectState,
+  schedules: SemesterSchedules,
+  splits: SemesterSplit[],
+  pinnedRuleIds?: Set<string>,
+  rng?: () => number,
+  budget: number = 150
+): void {
+  if (budget <= 0) return;
+  const all = [...schedules.semester1.schedule, ...schedules.semester2.schedule];
+  if (all.length === 0) return;
+
+  const teacherBusyRules: { teacherId: string; day: string; periods: Set<number> }[] = [];
+  const noFirstRules: { subjectId: string; groupId?: string }[] = [];
+  for (const c of project.constraints || []) {
+    if (c.kind === 'TEACHER_BUSY' && c.teacherId && c.periods && c.periods.length > 0) {
+      teacherBusyRules.push({ teacherId: c.teacherId, day: c.day || '*', periods: new Set(c.periods) });
+    } else if (c.kind === 'NO_FIRST_PERIOD' && c.subjectId) {
+      noFirstRules.push({ subjectId: c.subjectId, groupId: c.groupId });
+    }
+  }
+
+  const groupConfig = new Map<string, GroupScheduleConfig>();
+  for (const group of project.groups || []) groupConfig.set(group.id, computeGroupScheduleConfig(group));
+  const groupGrade = new Map<string, number>();
+  for (const group of project.groups || []) groupGrade.set(group.id, group.grade ?? 0);
+
+  const maxGroupsByRoom = new Map<string, number>();
+  for (const room of project.rooms || []) maxGroupsByRoom.set(room.id, Math.max(1, room.maxGroups ?? 1));
+  const maxGroupsByTeacher = new Map<string, number>();
+  for (const teacher of project.teachers || []) maxGroupsByTeacher.set(teacher.id, Math.max(1, teacher.maxGroups ?? 1));
+
+  const ruleMaxDaily = buildMaxDailyByRule(project);
+  const maxDailyByGroup = new Map<string, number>();
+  for (const group of project.groups || []) maxDailyByGroup.set(group.id, groupConfig.get(group.id)?.maxDaily ?? 8);
+
+  const lockedSlotsByRule = new Map<string, Set<string>>();
+  const lockedLessonIds = new Set<string>();
+  for (const lock of project.lockedLessons || []) {
+    if (!lock.ruleId || !DAYS.includes(lock.day) || !(lock.period >= 1 && lock.period <= 12)) continue;
+    if (!lockedSlotsByRule.has(lock.ruleId)) lockedSlotsByRule.set(lock.ruleId, new Set());
+    lockedSlotsByRule.get(lock.ruleId)!.add(`${lock.day}-${lock.period}`);
+    for (const l of all) {
+      if (l.ruleId === lock.ruleId && l.day === lock.day && l.period === lock.period) lockedLessonIds.add(l.id);
+    }
+  }
+
+  // Stable room per rule (most preferred policy room, else legacy roomId) that the
+  // room/movement operator tries to restore.
+  const stableRoomByRule = new Map<string, string>();
+  for (const rule of project.curriculum || []) {
+    const rp = rule.roomPolicy;
+    stableRoomByRule.set(rule.id, rp?.required?.[0] || rp?.preferred?.[0] || rule.roomId || '');
+  }
+
+  const ageBands = (project.schedulePolicy?.ageGroups || []).map((b) => {
+    const grades = new Set(b.grades);
+    return { grades, min: b.preferredPeriods.min, max: b.preferredPeriods.max };
+  });
+
+  let current = buildScore(schedules, splits, project, pinnedRuleIds);
+  const fields = [
+    'unscheduledLessons',
+    'pinnedUnassigned',
+    'dailyCompactness',
+    'longGapPenalty',
+    'sparseDayPenalty',
+    'subjectDistributionPenalty',
+    'parallelizationPenalty',
+    'ageShiftPenalty',
+    'roomStabilityPenalty',
+    'assignmentMovementPenalty',
+    'minorPreferencePenalty',
+  ] as (keyof ScheduleScore)[];
+
+  /** True when `s` is strictly better over fields 0..upto (ties on lower levels
+   *  allowed to drift freely). */
+  const betterUpTo = (s: ScheduleScore, upto: number): boolean => {
+    for (let j = 0; j <= upto; j++) {
+      const diff = Number(current[fields[j]]) - Number(s[fields[j]]);
+      if (diff !== 0) return diff > 0;
+    }
+    return false;
+  };
+
+  const periodsOf = (keyField: 'teacherId' | 'groupId', keyValue: string, day: string): number[] => {
+    const out: number[] = [];
+    for (const l of all) if ((l as any)[keyField] === keyValue && l.day === day) out.push(l.period);
+    out.sort((a, b) => a - b);
+    return out;
+  };
+
+  /** Hard-invariant check for moving `lesson` to (day, period). */
+  const canMove = (lesson: any, day: string, period: number): boolean => {
+    if (lockedLessonIds.has(lesson.id)) return false;
+    const lockedSlots = lockedSlotsByRule.get(lesson.ruleId);
+    if (lockedSlots && lockedSlots.has(`${day}-${period}`)) return false;
+    const cfg = groupConfig.get(lesson.groupId);
+    if (cfg) {
+      if (period < cfg.periodStart || period > cfg.periodEnd) return false;
+      if (
+        period === cfg.periodStart &&
+        noFirstRules.some((r) => r.subjectId === lesson.subjectId && (!r.groupId || r.groupId === lesson.groupId))
+      ) {
+        return false;
+      }
+    }
+    if (lesson.teacherId && isBusyRule(teacherBusyRules, lesson.teacherId, day, period)) return false;
+    let groupAtSlot = false;
+    let teacherGroups = 0;
+    let roomGroups = 0;
+    for (const other of all) {
+      if (other === lesson) continue;
+      if (other.day === day && other.period === period) {
+        if (other.groupId === lesson.groupId) {
+          groupAtSlot = true;
+          break;
+        }
+        if (lesson.teacherId && other.teacherId === lesson.teacherId) teacherGroups++;
+        if (lesson.roomId && other.roomId === lesson.roomId) roomGroups++;
+      }
+    }
+    if (groupAtSlot) return false;
+    if (lesson.teacherId && teacherGroups >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1)) return false;
+    if (lesson.roomId && roomGroups >= (maxGroupsByRoom.get(lesson.roomId) ?? 1)) return false;
+    let groupDay = 0;
+    let ruleDay = 0;
+    for (const other of all) {
+      if (other === lesson || other.day !== day) continue;
+      if (other.groupId === lesson.groupId) groupDay++;
+      if (other.ruleId === lesson.ruleId) ruleDay++;
+    }
+    if (groupDay >= (maxDailyByGroup.get(lesson.groupId) ?? 8)) return false;
+    const rl = ruleMaxDaily.get(lesson.ruleId);
+    if (rl != null && ruleDay >= rl) return false;
+    return true;
+  };
+
+  let evals = 0;
+  let stopped = false;
+  /** Apply a validated move; returns true when accepted (or the budget is spent). */
+  const tryMove = (lesson: any, day: string, period: number, upto: number): boolean => {
+    if (stopped) return true;
+    if (day === lesson.day && period === lesson.period) return false;
+    if (!canMove(lesson, day, period)) return false;
+    if (evals >= budget) {
+      stopped = true;
+      return true;
+    }
+    const oDay = lesson.day;
+    const oPeriod = lesson.period;
+    lesson.day = day;
+    lesson.period = period;
+    evals++;
+    const s = buildScore(schedules, splits, project, pinnedRuleIds);
+    if (betterUpTo(s, upto)) {
+      current = s;
+      return true;
+    }
+    lesson.day = oDay;
+    lesson.period = oPeriod;
+    return false;
+  };
+
+  const jittered = <T,>(arr: T[]): T[] => {
+    if (rng) {
+      const copy = [...arr];
+      shuffleInPlace(copy, rng);
+      return copy;
+    }
+    return arr;
+  };
+
+  const dayLessonCounts = new Map<string, number>();
+  const recountDays = () => {
+    dayLessonCounts.clear();
+    for (const l of all) dayLessonCounts.set(`${l.groupId}|${l.day}`, (dayLessonCounts.get(`${l.groupId}|${l.day}`) || 0) + 1);
+  };
+  recountDays();
+
+  const ops: { upto: number; label: string; run: () => void }[] = [
+    {
+      // Teacher + class compactness: move a same-key movable lesson into a gap cell.
+      label: 'compactness',
+      upto: 2,
+      run: () => {
+        for (const keyField of ['teacherId', 'groupId'] as const) {
+          const keys = [...new Set(all.map((l) => (l as any)[keyField]).filter(Boolean))] as string[];
+          for (const key of keys) {
+            for (const day of DAYS) {
+              if (stopped) return;
+              const periods = periodsOf(keyField, key, day);
+              if (periods.length < 2 || gapOfPeriods(periods) <= 0) continue;
+              const movable = jittered(all.filter((l) => (l as any)[keyField] === key && l.day === day));
+              for (let i = 1; i < periods.length && !stopped; i++) {
+                if (periods[i] - periods[i - 1] <= 1) continue;
+                for (let cell = periods[i - 1] + 1; cell < periods[i] && !stopped; cell++) {
+                  for (const l of movable) {
+                    if (l.period === cell) continue;
+                    if (tryMove(l, day, cell, 2)) break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+    },
+    {
+      // Long-gap removal: same as above but only targets gaps of 2+ free periods.
+      label: 'long-gaps',
+      upto: 3,
+      run: () => {
+        for (const keyField of ['teacherId', 'groupId'] as const) {
+          const keys = [...new Set(all.map((l) => (l as any)[keyField]).filter(Boolean))] as string[];
+          for (const key of keys) {
+            for (const day of DAYS) {
+              if (stopped) return;
+              const periods = periodsOf(keyField, key, day);
+              if (periods.length < 2) continue;
+              let hasLong = false;
+              for (let i = 1; i < periods.length; i++) {
+                if (periods[i] - periods[i - 1] - 1 >= 2) {
+                  hasLong = true;
+                  break;
+                }
+              }
+              if (!hasLong) continue;
+              const movable = jittered(all.filter((l) => (l as any)[keyField] === key && l.day === day));
+              for (let i = 1; i < periods.length && !stopped; i++) {
+                if (periods[i] - periods[i - 1] - 1 < 2) continue;
+                for (let cell = periods[i - 1] + 1; cell < periods[i] && !stopped; cell++) {
+                  for (const l of movable) {
+                    if (tryMove(l, day, cell, 3)) break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+    },
+    {
+      // Sparse days: give a one-lesson day a second lesson of the same group.
+      label: 'sparse-days',
+      upto: 4,
+      run: () => {
+        const sparse = [...dayLessonCounts.entries()].filter(([, n]) => n === 1);
+        for (const [gk, count] of sparse) {
+          if (stopped || count !== 1) return;
+          const [groupId, day] = gk.split('|');
+          const cfg = groupConfig.get(groupId);
+          const lo = cfg?.periodStart ?? 1;
+          const hi = cfg?.periodEnd ?? 12;
+          const movable = jittered(all.filter((l) => l.groupId === groupId && l.day !== day));
+          for (const l of movable) {
+            if (stopped) return;
+            for (let period = lo; period <= hi && !stopped; period++) {
+              if (tryMove(l, day, period, 4)) break;
+            }
+          }
+        }
+      },
+    },
+    {
+      // Subject distribution: pull a subject lesson off a stacked day onto a day
+      // where that (class, subject) is absent.
+      label: 'distribution',
+      upto: 5,
+      run: () => {
+        const byKey = new Map<string, { days: Set<string>; lessons: any[] }>();
+        for (const l of all) {
+          const key = `${l.groupId}|${l.subjectId}`;
+          if (!byKey.has(key)) byKey.set(key, { days: new Set(), lessons: [] });
+          const entry = byKey.get(key)!;
+          entry.days.add(l.day);
+          entry.lessons.push(l);
+        }
+        for (const [key, entry] of byKey) {
+          if (stopped) return;
+          const [, subjectId] = key.split('|');
+          const target = Math.min(3, entry.lessons.length);
+          if (entry.days.size >= target) continue;
+          const candidates = jittered(entry.lessons);
+          for (const day of DAYS) {
+            if (entry.days.has(day)) continue;
+            for (const l of candidates) {
+              if (stopped) return;
+              const cfg = groupConfig.get(l.groupId);
+              const lo = cfg?.periodStart ?? 1;
+              const hi = cfg?.periodEnd ?? 12;
+              for (let period = lo; period <= hi && !stopped; period++) {
+                if (tryMove(l, day, period, 5)) break;
+              }
+              void subjectId;
+            }
+          }
+        }
+      },
+    },
+    {
+      // Parallelization: mirror a subject day across explicit parallel groups.
+      label: 'parallelization',
+      upto: 6,
+      run: () => {
+        const byKey = new Map<string, Set<string>>();
+        for (const l of all) {
+          const key = `${l.groupId}|${l.subjectId}`;
+          if (!byKey.has(key)) byKey.set(key, new Set());
+          byKey.get(key)!.add(l.day);
+        }
+        for (const pg of project.parallelGroups || []) {
+          if (stopped) return;
+          const groups = pg.groupIds.filter((gid) => all.some((l) => l.groupId === gid));
+          if (groups.length < 2) continue;
+          const subjects = new Set<string>();
+          for (const gid of groups) {
+            for (const l of all) if (l.groupId === gid) subjects.add(l.subjectId);
+          }
+          for (const subjectId of subjects) {
+            if (stopped) return;
+            const dayFreq = new Map<string, number>();
+            for (const gid of groups) {
+              for (const d of byKey.get(`${gid}|${subjectId}`) || []) dayFreq.set(d, (dayFreq.get(d) || 0) + 1);
+            }
+            if (dayFreq.size < 1) continue;
+            const targetDay = [...dayFreq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+            for (const gid of groups) {
+              const gDays = byKey.get(`${gid}|${subjectId}`) || new Set();
+              if (gDays.has(targetDay)) continue;
+              const lessons = jittered(all.filter((l) => l.groupId === gid && l.subjectId === subjectId));
+              for (const l of lessons) {
+                if (stopped) return;
+                const cfg = groupConfig.get(l.groupId);
+                const lo = cfg?.periodStart ?? 1;
+                const hi = cfg?.periodEnd ?? 12;
+                for (let period = lo; period <= hi && !stopped; period++) {
+                  if (tryMove(l, targetDay, period, 6)) break;
+                }
+              }
+            }
+          }
+        }
+      },
+    },
+    {
+      // Age/shift: pull lessons of a band back inside its preferred period window.
+      label: 'age-shift',
+      upto: 7,
+      run: () => {
+        if (ageBands.length === 0) return;
+        for (const l of jittered(all)) {
+          if (stopped) return;
+          const band = ageBands.find((b) => b.grades.has(groupGrade.get(l.groupId) ?? -1));
+          if (!band) continue;
+          const lo = Math.max(band.min, groupConfig.get(l.groupId)?.periodStart ?? 1);
+          const hi = Math.min(band.max, groupConfig.get(l.groupId)?.periodEnd ?? 12);
+          if (l.period >= lo && l.period <= hi) continue;
+          for (let period = lo; period <= hi && !stopped; period++) {
+            if (tryMove(l, l.day, period, 7)) break;
+          }
+        }
+      },
+    },
+    {
+      // Room/movement stability: restore the rule's preferred room when it is free
+      // at the lesson's slot (room-only change, no slot conflict).
+      label: 'room-stability',
+      upto: 9,
+      run: () => {
+        for (const l of jittered(all)) {
+          if (stopped) return;
+          const stable = stableRoomByRule.get(l.ruleId);
+          if (!stable || l.roomId === stable) continue;
+          let otherGroupsAtRoom = 0;
+          let sameGroupThere = false;
+          for (const other of all) {
+            if (other === l) continue;
+            if (other.day === l.day && other.period === l.period && other.roomId === stable) {
+              if (other.groupId === l.groupId) sameGroupThere = true;
+              else otherGroupsAtRoom++;
+            }
+          }
+          if (sameGroupThere || otherGroupsAtRoom >= (maxGroupsByRoom.get(stable) ?? 1)) continue;
+          const originalRoom = l.roomId;
+          l.roomId = stable;
+          evals++;
+          const s = buildScore(schedules, splits, project, pinnedRuleIds);
+          if (betterUpTo(s, 9)) {
+            current = s;
+          } else {
+            l.roomId = originalRoom;
+          }
+          if (evals >= budget) {
+            stopped = true;
+            return;
+          }
+        }
+      },
+    },
+  ];
+
+  for (let round = 0; round < 3 && !stopped; round++) {
+    for (const op of ops) {
+      op.run();
+      if (stopped) break;
+    }
   }
 }
 
@@ -1309,7 +1929,7 @@ export async function generateSemesterSchedules(
       .map((r) => r.id)
   );
 
-  async function generateAttempt(seed: number, progressBase: number, progressSpan: number) {
+  async function generateAttempt(seed: number, progressBase: number, progressSpan: number, profile: AttemptProfile = 'conservative') {
     const rng = mulberry32(seed);
     const runScaled = async (semesterProject: ProjectState) => {
       return runGenerate(semesterProject, (msg) => {
@@ -1319,7 +1939,7 @@ export async function generateSemesterSchedules(
         } else if (msg.type === 'LOG') {
           emit(msg);
         }
-      }, rng, fixedRules, optimizePasses, maxRearrangeNodes);
+      }, rng, fixedRules, optimizePasses, maxRearrangeNodes, profile);
     };
 
     let splits = computeSemesterSplits(project);
@@ -1368,6 +1988,14 @@ export async function generateSemesterSchedules(
       semester2 = await runScaled(buildSemesterProject(project, 2, splits));
     }
 
+    // v4-36: bounded, score-gated local search across the finished semester pair
+    // (each operator in strict ScheduleScore LEVEL order; higher levels can never
+    // be worsened). gated by the per-attempt budget setting.
+    const localSearchBudget = settings?.localSearchEvals ?? 150;
+    if (localSearchBudget > 0 && collectUnassigned(semester1).size + collectUnassigned(semester2).size === 0) {
+      localSearch(project, { semester1, semester2 } as SemesterSchedules, splits, fixedRules, rng, localSearchBudget);
+    }
+
     return { schedules: { semester1, semester2 } as SemesterSchedules, splits };
   }
 
@@ -1412,7 +2040,8 @@ export async function generateSemesterSchedules(
       // Unlimited time needs the event loop freed between attempts too, so a
       // CANCEL can land; the bounded path keeps chewing through the deadline.
       if (unlimitedTime) await new Promise((r) => setTimeout(r, 0));
-      const candidate = await generateAttempt(0x9e3779b1 + ++attempt * 0x9e3779b1, 5, 85);
+      const profile = ATTEMPT_PROFILES[attempt % ATTEMPT_PROFILES.length];
+      const candidate = await generateAttempt(0x9e3779b1 + ++attempt * 0x9e3779b1, 5, 85, profile);
       const improved = consider(candidate);
       if (improved) {
         emitLog(emit, 'success', `Attempt ${attempt} complete — new best (quality ${Math.round(best!.quality)}).`, { attempt, attempts: attempt, pct: Math.min(95, 5 + Math.floor((attempt / 20) * 90)) });

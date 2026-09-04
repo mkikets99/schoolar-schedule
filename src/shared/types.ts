@@ -60,13 +60,34 @@ export interface Group {
   maxDailyLessons?: number;
 }
 
+/**
+ * Room selection policy (worker v0.4 spec §18). A rule may specify a layered
+ * set of rooms instead of a single forced `roomId`:
+ *  - `required`: a room that MUST be used (equivalent to a hard constraint);
+ *  - `preferred`: the room(s) tried first when free;
+ *  - `acceptable`: allowed alternatives tried before any rearrangement;
+ *  - `fallback`: rooms tried only after no acceptable room is free.
+ *
+ * Selection order (§19): preferred free → acceptable free → fallback free →
+ * rearrangement → unplaced. A lesson already assigned to a room is kept there
+ * when possible (room stability, §20).
+ */
+export interface RoomPolicy {
+  required?: string[];
+  preferred?: string[];
+  acceptable?: string[];
+  fallback?: string[];
+}
+
 export interface CurriculumRule {
   id: string;
   groupId: string;
   subjectId: string;
   hoursPerWeek: number;
   teacherId?: string; // Default teacher
-  roomId?: string; // Default room
+  roomId?: string; // Default room (legacy required room, kept for back-compat)
+  /** Layered room policy (worker v0.4). When unset, `roomId` remains the sole required room. */
+  roomPolicy?: RoomPolicy;
   doubleLesson?: boolean; // Prefer consecutive double lessons when scheduling
 }
 
@@ -215,28 +236,50 @@ export interface GenerateSettings {
    * schedule.
    */
   optimizePasses?: number;
+  /**
+   * Budget (in score evaluations) for the post-placement local search step
+   * (worker v0.4 spec §38-f). 0 disables the step entirely.
+   */
+  localSearchEvals?: number;
 }
 
 /**
- * A lexicographic schedule score vector (worker v0.3 spec §4/§23). Every field
- * is written so that a *smaller* value is *better*; the canonical ordering walks
- * them in priority order and higher is better by overall comparison. The first
- * field is completeness, so a complete but lower-quality timetable always beats
- * an incomplete one - never the reverse (spec §36 / acceptance Test 7).
+ * A lexicographic schedule score vector (worker v0.4 spec §23/§44). Every field
+ * is a penalty - a *smaller* value is *better*. `compareScores` walks the fields
+ * exactly in this order (completeness first), so a complete but lower-quality
+ * timetable always beats an incomplete one (spec §4 / §36). Each LEVEL group is
+ * a single structural block, not separate scalar weights (spec §24-§27).
  */
 export interface ScheduleScore {
-  /** Total unresolved lessons across both semesters (0 = complete). Smaller is better. */
+  /** LEVEL 1: total unresolved lessons across both semesters (0 = complete). */
   unscheduledLessons: number;
-  /** Pending hours for FORBID_LESSON-pinned rules (heavily weighted tie-break). */
+  /** LEVEL 1b: pending hours for FORBID_LESSON-pinned rules. */
   pinnedUnassigned: number;
-  /** Sum of every teacher's weekly free-hour gaps across both semesters. */
-  teacherTotalGapLength: number;
-  /** Number of teachers whose weekly gap exceeds the "bad" threshold. */
-  teacherLongGapCount: number;
-  /** Number of single-lesson teacher days (sparse-day penalty). */
-  sparseTeacherDayCount: number;
-  /** Penalty for deviation from the intended per-semester load distribution. */
-  distributionPenalty: number;
+
+  /** LEVEL 2: normalized daily compactness (teacher + class gaps + early/late). */
+  dailyCompactness: number;
+  /** LEVEL 2b: long-gap penalty (teacher + class gaps above the threshold). */
+  longGapPenalty: number;
+  /** LEVEL 2c: sparse-day penalty (single-lesson teacher/class days). */
+  sparseDayPenalty: number;
+
+  /** LEVEL 3: how evenly a subject is spread across the week per class. */
+  subjectDistributionPenalty: number;
+
+  /** LEVEL 4: how dissimilar parallel classes' subject-day structure is. */
+  parallelizationPenalty: number;
+
+  /** LEVEL 5: how far a class's time zone deviates from its age/shift preference. */
+  ageShiftPenalty: number;
+
+  /** LEVEL 6: penalty for changing a lesson's assigned room. */
+  roomStabilityPenalty: number;
+  /** LEVEL 6b: penalty for moving already-assigned lessons (prefer fresh moves). */
+  assignmentMovementPenalty: number;
+
+  /** LEVEL 7: minor preferences (room/move counts, ordering, randomization). */
+  minorPreferencePenalty: number;
+
   /** Total number of placed lessons (informational; kept last for display). */
   scheduledLessons: number;
 }
@@ -293,6 +336,49 @@ export interface RearrangeSuggestion {
   reason?: RearrangeBlockReason;
 }
 
+/**
+ * A parallel set: sibling classes (usually the same grade) that administrators
+ * want to keep structurally similar - same subject on the same days where
+ * possible (worker v0.4 spec §10). Never relied on to force identical
+ * timetables; it drives a *soft* similarity objective (§11). Groups listed here
+ * may belong to any grade; when no explicit parallel groups exist the engine
+ * derives them from `grade` as a back-compat fallback (spec v4-01).
+ */
+export interface ParallelGroup {
+  id: string;
+  /** Group ids that form one parallel set. */
+  groupIds: string[];
+}
+
+/**
+ * Soft age / shift policy (worker v0.4 spec §15-§17). Each age band prefers a
+ * time zone: young classes earlier, senior classes later. This is NOT a hard
+ * constraint - a lesson that must fall outside the band is allowed, but scores
+ * worse on `ageShiftPenalty`.
+ */
+export interface AgeGroupPolicy {
+  /** Grades covered by this band. */
+  grades: number[];
+  /** Preferred lesson period range for the band. */
+  preferredPeriods: { min: number; max: number };
+}
+
+/**
+ * Soft scheduling configuration (worker v0.4 spec v4-03). Only influences the
+ * score; never validity.
+ */
+export interface SchedulePolicy {
+  /** Age bands with preferred time zones (soft). */
+  ageGroups?: AgeGroupPolicy[];
+  /** Early/late lesson preferences (period windows). */
+  earlyLate?: {
+    teacher?: { preferredStartPeriod?: number; preferredEndPeriod?: number };
+    class?: { preferredStartPeriod?: number; preferredEndPeriod?: number };
+  };
+  /** Long-gap threshold in periods (default 2). */
+  longGapThreshold?: number;
+}
+
 export interface ProjectState {
   version: string;
   school: School;
@@ -304,6 +390,10 @@ export interface ProjectState {
   curriculum: CurriculumRule[];
   loadDistribution: LoadDistribution[];
   constraints: Constraint[];
+  /** Explicit parallel class sets (soft similarity objective). Optional. */
+  parallelGroups?: ParallelGroup[];
+  /** Soft scheduling policy (age/shift, early/late, long-gap). Optional. */
+  schedulePolicy?: SchedulePolicy;
   generatedSchedule?: ScheduleResult; // legacy single-schedule results (older exports)
   generatedSchedules?: SemesterSchedules;
   generatedSplits?: SemesterSplit[];
