@@ -768,7 +768,13 @@ async function runGenerate(
     const placedUnits = new Set<SchedulingUnit>();
     for (const [ruleId, locks] of lockByRule) {
       for (const lock of locks) {
-        const unit = units.find((u) => !placedUnits.has(u) && u.lessons[0].ruleId === ruleId);
+        // Match a unit that carries this rule among its lessons. For split
+        // subjects a unit contains one lesson per sub-rule (teachers rotate), so
+        // `lessons[0]` only ever matches the *first* sub-rule; a lock on a later
+        // sub-rule must still pin that split unit or it is silently dropped.
+        const unit = units.find(
+          (u) => !placedUnits.has(u) && u.lessons.some((l) => l.ruleId === ruleId)
+        );
         if (!unit) continue;
         // A locked slot outside the group's lesson window cannot be honored.
         const lockCfg = groupConfig.get(unit.groupId);
