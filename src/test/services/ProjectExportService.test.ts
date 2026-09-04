@@ -146,5 +146,51 @@ describe('ProjectExportService', () => {
       createElementSpy.mockRestore();
       revokeSpy.mockRestore();
     });
+
+    it('writes locked_lessons.json and round-trips locked lessons through import', async () => {
+      const { exportProject, importProject } = await import('../../ui/services/ProjectExportService');
+      const jszip = await import('jszip');
+
+      const project = createMockProject();
+      project.lockedLessons = [
+        { ruleId: 'c1', day: 'Monday', period: 1, semester: 'semester1' },
+        { ruleId: 'c1', day: 'Tuesday', period: 3, semester: 'semester2' },
+      ];
+
+      // Capture the Blob that exportProject hands to URL.createObjectURL.
+      let capturedBlob: Blob | undefined;
+      const origCreateElement = document.createElement.bind(document);
+      const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+        const el = origCreateElement(tagName, options);
+        if (tagName === 'a') {
+          vi.spyOn(el as HTMLAnchorElement, 'click').mockImplementation(() => {});
+        }
+        return el;
+      });
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      const createObjUrlSpy = vi.spyOn(URL, 'createObjectURL').mockImplementation((obj: unknown) => {
+        capturedBlob = obj as Blob;
+        return 'blob:mock';
+      });
+
+      await exportProject(project);
+      createElementSpy.mockRestore();
+      revokeSpy.mockRestore();
+      createObjUrlSpy.mockRestore();
+
+      expect(capturedBlob).toBeDefined();
+      const zip = await jszip.default.loadAsync(capturedBlob!);
+      expect(zip.file('locked_lessons.json')).toBeDefined();
+      const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
+      expect(manifest.files).toContain('locked_lessons.json');
+      const serialized = JSON.parse(await zip.file('locked_lessons.json')!.async('string'));
+      expect(serialized).toEqual(project.lockedLessons);
+
+      // Round-trip: import the same blob back and verify locks survive.
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const file = new File([blob], 'test.schoolproj');
+      const imported = await importProject(file);
+      expect(imported.lockedLessons).toEqual(project.lockedLessons);
+    });
   });
 });
