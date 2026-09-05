@@ -353,3 +353,42 @@ describe('suggestRearrange', () => {
     expect(displaced.some((m) => m.lessonId === 'C')).toBe(true);
   });
 });
+
+describe('locked lessons are immutable in rearrange', () => {
+  it('refuses to move a placed lesson pinned by a lock', () => {
+    const project = makeProject({ lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1 }] });
+    const schedule = [makeLesson('l1', { period: 1 })];
+    const s = suggestRearrange(project, schedule, 'l1', { day: 'Monday', period: 3 });
+    expect(s.feasible).toBe(false);
+    expect(s.reason).toBe('LOCKED');
+    expect(s.moves).toHaveLength(0);
+  });
+
+  it('never displaces a locked lesson to open the target slot', () => {
+    // l1 (g1, c1) is moved onto Monday/3, but l2 (g2, c2) sits there and is
+    // locked to its slot. The cascade must refuse to relocate l2.
+    const project = makeProject({ lockedLessons: [{ ruleId: 'c2', day: 'Monday', period: 3 }] });
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { id: 'l2', groupId: 'g2', ruleId: 'c2', period: 3 }),
+    ];
+    const s = suggestRearrange(project, schedule, 'l1', { day: 'Monday', period: 3 });
+    expect(s.feasible).toBe(false);
+    expect(s.moves.every((m) => m.lessonId !== 'l2')).toBe(true);
+  });
+
+  it('does not block placing an unplaced lesson whose rule carries a lock', () => {
+    // A pool lesson of a locked rule has no grid identity yet; its lock is a
+    // different slot, so auto-resolve / pool placement is still allowed.
+    const project = makeProject({ lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1 }] });
+    const ctx = createRearrangeContext(project);
+    const schedule = [makeLesson('l2', { id: 'l2', groupId: 'g2', ruleId: 'c2', period: 3 })];
+    const s = resolveUnplacedPlacement(
+      ctx,
+      schedule,
+      { id: 'new-c1', ruleId: 'c1', groupId: 'g1', subjectId: 'math', teacherId: 't1', roomId: 'r1' },
+      { day: 'Monday', period: 3 }
+    );
+    expect(s.feasible).toBe(true);
+  });
+});

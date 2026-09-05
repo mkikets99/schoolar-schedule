@@ -335,6 +335,9 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
   const unassignLesson = (id: string) => {
     const existing = gridLessons.find(l => l.id === id);
     if (!existing) return;
+    // A locked lesson stays put: unpinning it into the pool would strand its
+    // reserved slot (the lock still claims it) with no way to re-place it.
+    if (lockedKeys.has(`${existing.ruleId}|${existing.day}|${existing.period}`)) return;
     const src = poolSource[id];
 
     // Returning a cross-semester lesson to the pool reverts the hour shift.
@@ -440,6 +443,10 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
   }, [visibleGrid]);
 
   const handleDragStart = (e: DragEvent, id: string) => {
+    // Locked lessons are immutable: never start a drag for a lesson pinned to
+    // its locked slot (guard applies even though locked cells set draggable=false).
+    const lesson = gridLessons.find(l => l.id === id);
+    if (lesson && lockedKeys.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`)) return;
     dragRef.current = id;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', id);
@@ -569,7 +576,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
       <div
         key={lesson.id}
         className={`timeline-lesson ${conflicted ? 'conflict' : ''} ${locked ? 'locked' : ''}`}
-        draggable
+        draggable={!locked}
         onDragStart={(e) => handleDragStart(e, lesson.id)}
         onDoubleClick={() => onToggleLock?.(lesson)}
         style={{ borderLeftColor: subject?.color || undefined }}
@@ -582,6 +589,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
         <button
           className="timeline-lesson-remove"
           draggable={false}
+          disabled={locked}
           onClick={() => unassignLesson(lesson.id)}
           title={t('editor_remove')}
         >

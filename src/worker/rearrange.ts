@@ -289,6 +289,17 @@ function resolvePlacement(
   const infeasible = (reason: RearrangeBlockReason): RearrangeSuggestion =>
     ({ feasible: false, moves: [], reason });
 
+  // Locked lessons are immutable: a placed lesson sitting exactly on its locked
+  // slot must never be moved by the edit engine (the UI also blocks its drag).
+  // Unplaced lessons carry the rule's id but are absent from `schedule`, so a
+  // lock-slot ghost never blocks auto-resolve or pool placement of a fresh unit.
+  if (
+    ctx.lockedSlots.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`) &&
+    schedule.some((s) => s.id === lesson.id)
+  ) {
+    return [infeasible('LOCKED')];
+  }
+
   const mainMove = (teacherId: string): RearrangeMove => ({
     lessonId: lesson.id,
     toDay: moveTarget.day,

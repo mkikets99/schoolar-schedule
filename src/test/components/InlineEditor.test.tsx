@@ -609,4 +609,26 @@ describe('InlineEditor lesson locks', () => {
     const lesson = container.querySelector('.timeline-lesson')!;
     expect(lesson.className).not.toContain('locked');
   });
+
+  it('keeps a locked lesson on the grid: not draggable, not removable, still unlockable', () => {
+    const onToggleLock = vi.fn();
+    const project: ProjectState = {
+      ...makeProject(),
+      lockedLessons: [{ ruleId: 'c1', day: 'Monday', period: 1 }],
+    };
+    const { container } = render(
+      <InlineEditor project={project} activeSemester="semester1" onSave={vi.fn()} onToggleLock={onToggleLock} />
+    );
+    const lesson = container.querySelector('.timeline-lesson')! as HTMLElement;
+    expect(lesson.draggable).toBe(false);
+    expect((lesson.querySelector('.timeline-lesson-remove') as HTMLButtonElement).disabled).toBe(true);
+
+    const chipsBefore = container.querySelectorAll('.checker-chip').length;
+    fireEvent.click(lesson.querySelector('.timeline-lesson-remove')!);
+    expect(container.querySelectorAll('.timeline-lesson').length).toBe(1);
+    expect(container.querySelectorAll('.checker-chip').length).toBe(chipsBefore);
+
+    fireEvent.doubleClick(lesson);
+    expect(onToggleLock).toHaveBeenCalledTimes(1);
+  });
 });

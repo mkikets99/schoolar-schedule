@@ -319,6 +319,7 @@ export type RearrangeBlockReason =
   | 'DAILY_RULE' // the rule already has its max lessons for that day
   | 'TEACHER_BUSY' // the teacher is unavailable at that slot
   | 'SPLIT_PARTNER' // a colliding lesson is a split/double partner and can't move
+  | 'LOCKED' // the moved lesson is pinned to its slot by a lock and is immutable
   | 'NO_SPACE'; // no relocation or substitute could open the slot
 
 /**
