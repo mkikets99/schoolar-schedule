@@ -1,5 +1,5 @@
 import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig, buildMaxDailyByRule, AllowedConflictReason } from '../../shared/types';
-import { isAllowedConflict } from '../../shared/allowedConflicts';
+import { isAllowedConflict, isLessonInBoundPair } from '../../shared/allowedConflicts';
 
 export const CONFLICT_REASON = {
   TEACHER_SLOT: 'conflict_teacher_slot',
@@ -208,14 +208,22 @@ export function analyzeEmptySlots(
   return result;
 }
 
-export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: ProjectState): ScheduleAnalysis {
+export function analyzeSchedule(
+  placed: Lesson[],
+  pool: Lesson[],
+  project: ProjectState,
+  semester?: 'semester1' | 'semester2'
+): ScheduleAnalysis {
   const reasons = new Map<string, string[]>();
   const add = (id: string, reason: string) => {
     // Atoms that a recorded allowance covers are not reported at all: allowed
-    // conflicts are tolerated by agreement, not surfaced as problems.
+    // conflicts are tolerated by agreement, not surfaced as problems. Pair
+    // bindings (kind === 'pair') also suppress their conflicts - both bound
+    // lessons are scheduled together by design.
     const type = conflictReasonTypeOf(reason);
     const lesson = lessonById.get(id);
     if (type && lesson && isAllowedConflict(project.allowedConflicts, lesson, type)) return;
+    if (lesson && isLessonInBoundPair(project.allowedConflicts, lesson.ruleId, semester)) return;
     if (!reasons.has(id)) reasons.set(id, []);
     if (!reasons.get(id)!.includes(reason)) reasons.get(id)!.push(reason);
   };

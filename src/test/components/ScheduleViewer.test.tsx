@@ -116,4 +116,13 @@ describe('ScheduleViewer allowed conflicts (view mode)', () => {
     fireEvent.click(manageBtn!);
     expect(container.querySelectorAll('.remove-allowed-btn').length).toBe(2);
   });
+
+  it('marks both lessons allowed when a pair binding ties the two rules', () => {
+    // No entity consents at all - the pair binding alone waives the overlap.
+    stubProject(makeTwoGroupProject([{ id: 'bp1', kind: 'pair', ruleIdA: 'c1', ruleIdB: 'c2', reason: 'TEACHER_SLOT' }]));
+    const { container } = render(<ScheduleViewer />);
+    const grid = container.querySelector('.schedule-grid')!;
+    expect(grid.querySelectorAll('.lesson-box.conflict').length).toBe(0);
+    expect(grid.querySelectorAll('.conflict-badge-small.allowed').length).toBe(2);
+  });
 });

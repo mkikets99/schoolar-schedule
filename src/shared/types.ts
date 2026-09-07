@@ -175,20 +175,37 @@ export type AllowedConflictReason =
   | '*';
 
 /**
- * A recorded agreement that a specific conflict is allowed. The generator may
- * place lessons that trigger it (tolerating the overlap), and the analyzer
- * stops reporting it. To allow a teacher supervising several classes at once,
- * every involved (teacher, class) pair needs its own consent - both sides agree.
+ * A recorded agreement that a specific conflict is allowed.
+ *
+ * Two shapes exist:
+ *
+ * 1. Legacy entity-wide consent (`kind: 'teacher' | 'group' | 'room'`): the
+ *    generator tolerates the recorded overlap whenever it occurs. Kept for
+ *    back-compat with older exports.
+ *
+ * 2. Pair binding (`kind: 'pair'`): two lessons (identified by `ruleIdA` /
+ *    `ruleIdB`, scoped to `semester`) are bound together - on *every* future
+ *    generation BOTH lessons must be placed (guaranteed, high priority, never
+ *    left unassigned), using allowed-overlap tolerance when a hard slot is
+ *    taken. This is not a slot lock: the pair lands wherever the generator
+ *    finds room; pinning a slot is the dedicated LockedLesson job. Un-binding
+ *    (re-flagging in the editor) removes the requirement.
  */
 export interface AllowedConflict {
   id: string;
-  /** Which side(s) drive the agreement: teacher + class, class alone, or room + class. */
-  kind: 'teacher' | 'group' | 'room';
+  /** The agreement kind: teacher + class, class alone, room + class, or a two-lesson pair binding. */
+  kind: 'teacher' | 'group' | 'room' | 'pair';
   teacherId?: string;
   groupId?: string;
   roomId?: string;
   reason: AllowedConflictReason;
   note?: string;
+  /** kind === 'pair': first bound lesson (curriculum rule). */
+  ruleIdA?: string;
+  /** kind === 'pair': second bound lesson (curriculum rule). */
+  ruleIdB?: string;
+  /** kind === 'pair': which semester the binding applies to. Undefined = both. */
+  semester?: 'semester1' | 'semester2';
 }
 
 /** How the schedule grid filters lessons: an entity kind and its id. */

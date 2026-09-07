@@ -63,7 +63,48 @@ export function buildAllowedConsentSets(allowedConflicts: AllowedConflict[] | un
 
 /** Field-scope signature used to dedupe records and detect "the same allowance". */
 export function allowedConflictSignature(a: AllowedConflict): string {
+  if (a.kind === 'pair') {
+    return `pair|${a.semester ?? ''}|${[a.ruleIdA, a.ruleIdB].sort().join('|')}`;
+  }
   return `${a.kind}|${a.reason}|${a.teacherId ?? ''}|${a.groupId ?? ''}|${a.roomId ?? ''}`;
+}
+
+/**
+ * The set of curriculum rule ids that a pair binding forces to be placed for a
+ * given semester. A binding with no `semester` applies to both semesters.
+ */
+export function boundRuleIdsForSemester(
+  allowedConflicts: AllowedConflict[] | undefined,
+  semester?: 'semester1' | 'semester2'
+): Set<string> {
+  const rules = new Set<string>();
+  for (const a of allowedConflicts || []) {
+    if (a.kind !== 'pair') continue;
+    if (a.semester && a.semester !== semester) continue;
+    if (a.ruleIdA) rules.add(a.ruleIdA);
+    if (a.ruleIdB) rules.add(a.ruleIdB);
+  }
+  return rules;
+}
+
+/**
+ * True when a lesson (by ruleId) participates in a pair binding for the given
+ * semester. Used by the analyzer and views to suppress the bound pair's
+ * conflict (it is allowed by agreement, not an error). Binds to a lesson's
+ * ruleId because a pair is a rule-to-rule contract that outlives regenerated
+ * lesson ids.
+ */
+export function isLessonInBoundPair(
+  allowedConflicts: AllowedConflict[] | undefined,
+  ruleId: string,
+  semester?: 'semester1' | 'semester2'
+): boolean {
+  if (!allowedConflicts) return false;
+  return allowedConflicts.some(
+    (a) => a.kind === 'pair' &&
+      (!a.semester || a.semester === semester) &&
+      (a.ruleIdA === ruleId || a.ruleIdB === ruleId)
+  );
 }
 
 function involvedGroups(
@@ -76,9 +117,41 @@ function involvedGroups(
 }
 
 /**
- * Build the deduped permission records that make every given reason for a
- * lesson allowed. For overlaps (TEACHER_SLOT / ROOM_SLOT) every involved class
- * gets its own consent record so both sides of the agreement are present.
+ * Build the deduped pair-binding records for a clicked lesson against its
+ * conflicting partner lessons. Each distinct partner gets its own
+ * `kind: 'pair'` record tying `lesson.ruleId` to the partner's ruleId, scoped to
+ * `semester` (or both when undefined). This is the "allow these 2 lessons that
+ * conflict right now" action: it is NOT whole-class - only the two bound rules
+ * are required to be placed together on future generations.
+ */
+export function buildPairBindingRecords(
+  lesson: { ruleId: string; day: string; period: number; teacherId?: string; groupId: string },
+  causes: Array<{ ruleId: string; day: string; period: number; teacherId?: string; groupId: string }>,
+  semester?: 'semester1' | 'semester2',
+  reason: AllowedConflictReason = 'TEACHER_SLOT'
+): AllowedConflict[] {
+  const out: AllowedConflict[] = [];
+  const seen = new Set<string>();
+  for (const cause of causes) {
+    if (cause.ruleId === lesson.ruleId) continue;
+    const pairKey = `${[lesson.ruleId, cause.ruleId].sort().join('|')}`;
+    if (seen.has(pairKey)) continue;
+    seen.add(pairKey);
+    out.push({
+      id: crypto.randomUUID(),
+      kind: 'pair',
+      ruleIdA: lesson.ruleId,
+      ruleIdB: cause.ruleId,
+      semester,
+      reason,
+    });
+  }
+  return out;
+}
+
+/**
+ * The legacy consensus records writer (teacher/group/room entity consent). Kept
+ * for back-compat; new pair bindings go through {@link buildPairBindingRecords}.
  */
 export function recordsToAllowLesson(
   lesson: { teacherId?: string; groupId: string; roomId?: string },

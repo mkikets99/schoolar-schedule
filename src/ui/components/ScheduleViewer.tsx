@@ -8,7 +8,7 @@ import { InlineEditor } from './InlineEditor';
 import { SearchableSelect } from './SearchableSelect';
 import { analyzeEmptySlots } from '../services/scheduleAnalyzer';
 import { CurriculumRule, Lesson, LockedLesson, ScheduleResult, SemesterSplit, AllowedConflict, AllowedConflictReason } from '../../shared/types';
-import { allowedConflictSignature, isAllowedConflict } from '../../shared/allowedConflicts';
+import { allowedConflictSignature, isAllowedConflict, isLessonInBoundPair } from '../../shared/allowedConflicts';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
@@ -97,11 +97,13 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
 
     const activeConflicts = new Set<string>();
     const allowedConflicts = new Set<string>();
+    const semesterScope = project?.generatedSchedules ? activeSemester : undefined;
     for (const [lid, reasonSet] of reasons) {
       const lesson = schedule.find(l => l.id === lid);
       if (!lesson) continue;
       const covered = [...reasonSet].every(r => isAllowedConflict(project?.allowedConflicts, lesson, r));
-      if (covered) allowedConflicts.add(lid);
+      const paired = isLessonInBoundPair(project?.allowedConflicts, lesson.ruleId, semesterScope);
+      if (covered || paired) allowedConflicts.add(lid);
       else activeConflicts.add(lid);
     }
     return { activeConflicts, allowedConflicts };
@@ -385,7 +387,17 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
     return t(key);
   };
 
+  const pairRuleDescription = (ruleId?: string) => {
+    const rule = (project?.curriculum || []).find(r => r.id === ruleId);
+    if (!rule) return ruleId || '?';
+    const subject = getSubjectName(rule.subjectId);
+    return `${subject} (${getGroupName(rule.groupId) || rule.groupId})`;
+  };
+
   const allowedConflictDescription = (a: AllowedConflict) => {
+    if (a.kind === 'pair') {
+      return `${pairRuleDescription(a.ruleIdA)} ⇆ ${pairRuleDescription(a.ruleIdB)}`;
+    }
     if (a.kind === 'teacher') return `${getTeacherName(a.teacherId) || '?'} + ${getGroupName(a.groupId || '')}`;
     if (a.kind === 'room') return `${getRoomName(a.roomId || '')} + ${getGroupName(a.groupId || '')}`;
     return getGroupName(a.groupId || '') || getRoomName(a.roomId || '') || '?';

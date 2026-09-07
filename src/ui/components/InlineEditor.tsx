@@ -3,7 +3,7 @@ import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, ScheduleFilter, SemesterSplit, AllowedConflict, AllowedConflictReason } from '../../shared/types';
 import { analyzeSchedule, buildConflicts, computeScore, countLessons, conflictReasonTypeOf } from '../services/scheduleAnalyzer';
-import { recordsToAllowLesson, isAllowedConflict } from '../../shared/allowedConflicts';
+import { buildPairBindingRecords, isAllowedConflict, isLessonInBoundPair } from '../../shared/allowedConflicts';
 import { workerPool } from '../services/workerPool';
 import { Modal } from './Modal';
 
@@ -372,8 +372,8 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
   );
 
   const analysis = useMemo(
-    () => analyzeSchedule(gridLessons, activePool, project),
-    [gridLessons, activePool, project]
+    () => analyzeSchedule(gridLessons, activePool, project, project.generatedSchedules ? activeSemester : undefined),
+    [gridLessons, activePool, project, activeSemester]
   );
 
   // Unsuppressed analysis: the conflicts the analyzer WOULD flag before any
@@ -386,7 +386,12 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
   );
   const allowedLessonIds = useMemo(() => {
     const ids = new Set<string>();
+    const semesterScope = project.generatedSchedules ? activeSemester : undefined;
     for (const lesson of gridLessons) {
+      if (isLessonInBoundPair(project.allowedConflicts, lesson.ruleId, semesterScope)) {
+        ids.add(lesson.id);
+        continue;
+      }
       const reasons = rawAnalysis.byLesson.get(lesson.id) || [];
       if (reasons.length === 0) continue;
       if (reasons.every(r => {
@@ -395,13 +400,19 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
       })) ids.add(lesson.id);
     }
     return ids;
-  }, [rawAnalysis, gridLessons, project]);
+  }, [rawAnalysis, gridLessons, project, activeSemester]);
   const recordsForLesson = (lesson: Lesson): AllowedConflict[] => {
-    const reasons = (rawAnalysis.byLesson.get(lesson.id) || [])
+    // A pair binding ties the clicked lesson to each OTHER lesson it conflicts
+    // with in this exact slot right now. This is precise - not whole-class: only
+    // the two bound rules are forced to be placed together on future generations.
+    const semesterScope = project.generatedSchedules ? activeSemester : undefined;
+    const causes = (rawAnalysis.causesByLesson.get(lesson.id) || [])
+      .filter((c) => c.day === lesson.day && c.period === lesson.period);
+    if (causes.length === 0) return [];
+    const reason = (rawAnalysis.byLesson.get(lesson.id) || [])
       .map(conflictReasonTypeOf)
-      .filter((r): r is AllowedConflictReason => !!r);
-    if (reasons.length === 0) return [];
-    return recordsToAllowLesson(lesson, rawAnalysis.causesByLesson.get(lesson.id) || [], reasons);
+      .find((r): r is AllowedConflictReason => !!r) ?? 'TEACHER_SLOT';
+    return buildPairBindingRecords(lesson, causes, semesterScope, reason);
   };
 
   const visibleGrid = useMemo(
@@ -616,22 +627,22 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
         <span className="timeline-lesson-subject">{subject?.shortName || subject?.name || '?'}</span>
         <span className="timeline-lesson-group">{getGroupName(lesson.groupId)}</span>
         {locked && <span className="timeline-lesson-lock-badge">{t('locked')}</span>}
-        {conflicted && (
-          <button
-            className="timeline-lesson-conflict-badge"
-            onClick={() => onToggleAllowedConflict?.(lesson, recordsForLesson(lesson))}
-            title={t('allow_conflict')}
-          >
-            !
-          </button>
-        )}
-        {!conflicted && allowed && (
+        {allowed && (
           <button
             className="timeline-lesson-conflict-badge allowed"
             onClick={() => onToggleAllowedConflict?.(lesson, recordsForLesson(lesson))}
             title={t('unallow_conflict')}
           >
             &#10003;
+          </button>
+        )}
+        {!allowed && conflicted && (
+          <button
+            className="timeline-lesson-conflict-badge"
+            onClick={() => onToggleAllowedConflict?.(lesson, recordsForLesson(lesson))}
+            title={t('allow_conflict')}
+          >
+            !
           </button>
         )}
         <button

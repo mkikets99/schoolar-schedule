@@ -1,5 +1,5 @@
 import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson, ScheduleScore, GenerationLogEntry } from '../shared/types';
-import { buildAllowedConsentSets } from '../shared/allowedConflicts';
+import { buildAllowedConsentSets, boundRuleIdsForSemester } from '../shared/allowedConflicts';
 import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
 import { buildScheduleScore, compareScores, scoreVectorToNumber } from './score';
 
@@ -290,7 +290,8 @@ async function runGenerate(
   pinnedRuleIds?: Set<string>,
   optimizePasses = DEFAULT_OPTIMIZE_PASSES,
   nodeBudget?: number,
-  profile: AttemptProfile = 'conservative'
+  profile: AttemptProfile = 'conservative',
+  semester?: 'semester1' | 'semester2'
 ): Promise<{ schedule: any[]; conflicts: any[]; score: number }> {
   const days = DAYS;
 
@@ -370,6 +371,14 @@ async function runGenerate(
   for (const a of project.allowedConflicts || []) {
     if (a.groupId) priorityGroupIds.add(a.groupId);
   }
+
+  // Pair bindings (kind === 'pair'): the bound lessons MUST be placed on this
+  // semester's schedule - a hard guarantee, not just a preference. Bound rules
+  // out-rank everything else in the placement order and, if a greedy pass still
+  // leaves one unassigned, it is force-placed with allowed-overlap tolerance so
+  // it always lands.
+  const boundRules = boundRuleIdsForSemester(project.allowedConflicts, semester);
+  const boundRuleSet = new Set<string>([...boundRules]);
 
   const groupBusy = new Set<string>();
   // roomId-slotKey -> set of groupIds currently in that room at that slot.
@@ -541,6 +550,12 @@ async function runGenerate(
   }
 
   units.sort((a, b) => {
+    // Bound-pair lessons place before anything else: they are guaranteed to be
+    // placed, so giving them first pick of slots is what makes that guarantee
+    // achievable.
+    const ba = boundRuleSet.has(a.lessons[0].ruleId) ? 0 : 1;
+    const bb = boundRuleSet.has(b.lessons[0].ruleId) ? 0 : 1;
+    if (ba !== bb) return ba - bb;
     // Allowed-conflict groups place before everything else: consenting to an
     // overlap marks the class as needing its lessons placed first, ahead of the
     // most-constrained-first heuristics below.
@@ -591,7 +606,7 @@ async function runGenerate(
     let lastKey = '';
     for (const u of arr) {
       const c = constraintOf.get(u.lessons[0].id);
-      const key = `${priorityGroupIds.has(u.groupId) ? 1 : 0}|${c ? `${c.slots}|${c.rooms}|${c.locks}|${c.share}|${c.freq}` : ''}|${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}|${groupLessonTotals.get(u.groupId) || 0}|${u.lessons[0]?.teacherId || ''}`;
+      const key = `${boundRuleSet.has(u.lessons[0].ruleId) ? 1 : 0}|${priorityGroupIds.has(u.groupId) ? 1 : 0}|${c ? `${c.slots}|${c.rooms}|${c.locks}|${c.share}|${c.freq}` : ''}|${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}|${groupLessonTotals.get(u.groupId) || 0}|${u.lessons[0]?.teacherId || ''}`;
       if (key !== lastKey && run.length > 0) {
         shuffleInPlace(run, rngFn);
         out.push(...run);
@@ -763,6 +778,29 @@ async function runGenerate(
       const rcounts = ruleDailyCounts.get(lesson.ruleId);
       if (rcounts) rcounts[di]++;
     }
+  }
+
+  // Guarantee pass helper for pair-bound lessons: force `lesson` into the first
+  // day/period that keeps it inside its group's window and respects the per-rule
+  // daily cap, tolerating every other overlap (teacher, room, group). A bound
+  // pair's two lessons are allowed to overlap alongside anything, so placement
+  // never fails on a hard cap.
+  function placeGuaranteedBoundLesson(lesson: LessonStub): boolean {
+    const cfg = groupConfig.get(lesson.groupId);
+    const start = cfg?.periodStart ?? 1;
+    const end = cfg?.periodEnd ?? 8;
+    const cap = maxDailyByRule.get(lesson.ruleId);
+    const ruleCounts = ruleDailyCounts.get(lesson.ruleId);
+    for (const day of days) {
+      const di = days.indexOf(day);
+      if (cap !== undefined && ruleCounts && ruleCounts[di] >= cap) continue;
+      for (let p = start; p <= end; p++) {
+        if (cap !== undefined && ruleCounts && ruleCounts[di] >= cap) break;
+        placeLesson(lesson, day, p);
+        return true;
+      }
+    }
+    return false;
   }
 
   function tryPlaceDouble(unit: SchedulingUnit, day: string, period: number, allowLockedRuleSlot = false): boolean {
@@ -1103,6 +1141,24 @@ async function runGenerate(
   emitLog(emit, 'info', `Initial placement: ${unitsAssigned}/${totalUnits} lessons placed${unassignedCount ? `, ${unassignedCount} unassigned` : '.'}`);
 
   autoResolveUnassigned(project, schedule, conflicts, nodeBudget);
+
+  // Guarantee: pair-bound lessons must land even if every convention failed.
+  // Whatever the greedy and auto-resolve passes could not place for a bound rule
+  // is force-placed with full overlap tolerance, so the requirement holds on
+  // every generation until the constraint is unlocked.
+  if (boundRuleSet.size > 0) {
+    for (const unit of units) {
+      if (!boundRuleSet.has(unit.lessons[0].ruleId)) continue;
+      for (const lesson of unit.lessons) {
+        if (schedule.some((l) => l.id === lesson.id)) continue;
+        if (placeGuaranteedBoundLesson(lesson)) {
+          unitsAssigned++;
+        } else {
+          conflicts.push({ type: 'UNASSIGNED_HOURS', ruleId: lesson.ruleId, missing: 1 });
+        }
+      }
+    }
+  }
 
   emitLog(emit, 'info', 'Optimizing teacher gap distribution…');
   optimizeGaps(schedule, teacherBusyRules, noFirstRules, groupConfig, maxGroupsByRoom, maxGroupsByTeacher, rng, optimizePasses, lockedSlots);
@@ -1981,7 +2037,7 @@ export async function generateSemesterSchedules(
 
   async function generateAttempt(seed: number, progressBase: number, progressSpan: number, profile: AttemptProfile = 'conservative') {
     const rng = mulberry32(seed);
-    const runScaled = async (semesterProject: ProjectState) => {
+    const runScaled = async (semesterProject: ProjectState, semester?: 'semester1' | 'semester2') => {
       return runGenerate(semesterProject, (msg) => {
         if (msg.type === 'PROGRESS') {
           const p = typeof msg.payload?.progress === 'number' ? msg.payload.progress : 0;
@@ -1989,7 +2045,7 @@ export async function generateSemesterSchedules(
         } else if (msg.type === 'LOG') {
           emit(msg);
         }
-      }, rng, fixedRules, optimizePasses, maxRearrangeNodes, profile);
+      }, rng, fixedRules, optimizePasses, maxRearrangeNodes, profile, semester);
     };
 
     let splits = computeSemesterSplits(project);
@@ -2000,10 +2056,10 @@ export async function generateSemesterSchedules(
 
     take(0.45);
     emitLog(emit, 'step', 'Placing semester 1 lessons…');
-    let semester1 = await runScaled(buildSemesterProject(project, 1, splits));
+    let semester1 = await runScaled(buildSemesterProject(project, 1, splits), "semester1");
     take(0.45);
     emitLog(emit, 'step', 'Placing semester 2 lessons…');
-    let semester2 = await runScaled(buildSemesterProject(project, 2, splits));
+    let semester2 = await runScaled(buildSemesterProject(project, 2, splits), "semester2");
 
     // Lessons that cannot be placed in one semester are moved to the other by
     // adjusting the per-rule split (the annual hour total is preserved). Only
@@ -2033,9 +2089,9 @@ export async function generateSemesterSchedules(
 
       take(0.05);
       emitLog(emit, 'step', `Spill pass ${iter + 1}: redistributing unplaced lessons across semesters…`);
-      semester1 = await runScaled(buildSemesterProject(project, 1, splits));
+      semester1 = await runScaled(buildSemesterProject(project, 1, splits), "semester1");
       take(0.05);
-      semester2 = await runScaled(buildSemesterProject(project, 2, splits));
+      semester2 = await runScaled(buildSemesterProject(project, 2, splits), "semester2");
     }
 
     // v4-36: bounded, score-gated local search across the finished semester pair

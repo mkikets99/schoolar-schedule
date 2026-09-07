@@ -632,7 +632,7 @@ describe('InlineEditor lesson locks', () => {
     expect(onToggleLock).toHaveBeenCalledTimes(1);
   });
 
-  it('lets a conflicted lesson be toggled allowed, recording both teacher consents', () => {
+  it('lets a conflicted lesson be toggled allowed, recording the pair binding', () => {
     const onToggleAllowedConflict = vi.fn();
     const { container } = render(
       <InlineEditor
@@ -647,11 +647,13 @@ describe('InlineEditor lesson locks', () => {
     expect(badge.className).not.toContain('allowed');
     fireEvent.click(badge);
     expect(onToggleAllowedConflict).toHaveBeenCalledTimes(1);
-    const records = onToggleAllowedConflict.mock.calls[0][1];
-    expect(records.length).toBeGreaterThanOrEqual(2);
-    // Overlapping classes g1 and g2 both need a teacher consent record.
-    expect(records.some((r: any) => r.reason === 'TEACHER_SLOT' && r.groupId === 'g1')).toBe(true);
-    expect(records.some((r: any) => r.reason === 'TEACHER_SLOT' && r.groupId === 'g2')).toBe(true);
+    const records: any[] = onToggleAllowedConflict.mock.calls[0][1];
+    expect(records).toHaveLength(1);
+    // A pair binding ties the clicked rule to the OTHER rule it conflicts with
+    // in this exact slot - both must be placed on every future generation.
+    expect(records[0].kind).toBe('pair');
+    expect([records[0].ruleIdA, records[0].ruleIdB].sort()).toEqual(['c1', 'c2']);
+    expect(records[0].reason).toBe('TEACHER_SLOT');
   });
 
   it('shows a check badge when every raw reason is consented, and unallows on click', () => {
