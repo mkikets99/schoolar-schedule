@@ -192,5 +192,49 @@ describe('ProjectExportService', () => {
       const imported = await importProject(file);
       expect(imported.lockedLessons).toEqual(project.lockedLessons);
     });
+
+    it('writes allowed_conflicts.json and round-trips allowed conflicts through import', async () => {
+      const { exportProject, importProject } = await import('../../ui/services/ProjectExportService');
+      const jszip = await import('jszip');
+
+      const project = createMockProject();
+      project.allowedConflicts = [
+        { id: 'a1', kind: 'teacher', teacherId: 't1', groupId: 'g1', reason: 'TEACHER_SLOT' },
+        { id: 'a2', kind: 'room', roomId: 'r1', groupId: 'g1', reason: 'ROOM_SLOT' },
+      ];
+
+      let capturedBlob: Blob | undefined;
+      const origCreateElement = document.createElement.bind(document);
+      const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+        const el = origCreateElement(tagName, options);
+        if (tagName === 'a') {
+          vi.spyOn(el as HTMLAnchorElement, 'click').mockImplementation(() => {});
+        }
+        return el;
+      });
+      const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+      const createObjUrlSpy = vi.spyOn(URL, 'createObjectURL').mockImplementation((obj: unknown) => {
+        capturedBlob = obj as Blob;
+        return 'blob:mock';
+      });
+
+      await exportProject(project);
+      createElementSpy.mockRestore();
+      revokeSpy.mockRestore();
+      createObjUrlSpy.mockRestore();
+
+      expect(capturedBlob).toBeDefined();
+      const zip = await jszip.default.loadAsync(capturedBlob!);
+      expect(zip.file('allowed_conflicts.json')).toBeDefined();
+      const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
+      expect(manifest.files).toContain('allowed_conflicts.json');
+      const serialized = JSON.parse(await zip.file('allowed_conflicts.json')!.async('string'));
+      expect(serialized).toEqual(project.allowedConflicts);
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const file = new File([blob], 'test.schoolproj');
+      const imported = await importProject(file);
+      expect(imported.allowedConflicts).toEqual(project.allowedConflicts);
+    });
   });
 });

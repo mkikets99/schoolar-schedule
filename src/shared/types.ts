@@ -156,6 +156,41 @@ export interface LockedLesson {
   semester?: 'semester1' | 'semester2';
 }
 
+/**
+ * Which conflict kinds a school has expressly agreed to tolerate. Mimics the
+ * analyzer's `CONFLICT_REASON` taxonomy; `'*'` waives every kind between the
+ * named parties. Consent is always teacher-wide / class-wide, never
+ * slot-specific: any slot where the recorded parties overlap in the given way
+ * is accepted for future generations.
+ */
+export type AllowedConflictReason =
+  | 'TEACHER_SLOT'
+  | 'GROUP_SLOT'
+  | 'ROOM_SLOT'
+  | 'TEACHER_BUSY'
+  | 'NO_FIRST'
+  | 'OUT_OF_RANGE'
+  | 'DAILY_OVERLOAD'
+  | 'DAILY_RULE'
+  | '*';
+
+/**
+ * A recorded agreement that a specific conflict is allowed. The generator may
+ * place lessons that trigger it (tolerating the overlap), and the analyzer
+ * stops reporting it. To allow a teacher supervising several classes at once,
+ * every involved (teacher, class) pair needs its own consent - both sides agree.
+ */
+export interface AllowedConflict {
+  id: string;
+  /** Which side(s) drive the agreement: teacher + class, class alone, or room + class. */
+  kind: 'teacher' | 'group' | 'room';
+  teacherId?: string;
+  groupId?: string;
+  roomId?: string;
+  reason: AllowedConflictReason;
+  note?: string;
+}
+
 /** How the schedule grid filters lessons: an entity kind and its id. */
 export interface ScheduleFilter {
   type: 'all' | 'group' | 'teacher' | 'subject';
@@ -399,6 +434,7 @@ export interface ProjectState {
   generatedSchedules?: SemesterSchedules;
   generatedSplits?: SemesterSplit[];
   lockedLessons?: LockedLesson[]; // lessons pinned against future generation
+  allowedConflicts?: AllowedConflict[]; // conflicts the school has agreed to tolerate
 }
 
 /**

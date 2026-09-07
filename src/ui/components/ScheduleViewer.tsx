@@ -7,14 +7,15 @@ import { Modal } from './Modal';
 import { InlineEditor } from './InlineEditor';
 import { SearchableSelect } from './SearchableSelect';
 import { analyzeEmptySlots } from '../services/scheduleAnalyzer';
-import { CurriculumRule, Lesson, LockedLesson, ScheduleResult, SemesterSplit } from '../../shared/types';
+import { CurriculumRule, Lesson, LockedLesson, ScheduleResult, SemesterSplit, AllowedConflict, AllowedConflictReason } from '../../shared/types';
+import { allowedConflictSignature, isAllowedConflict } from '../../shared/allowedConflicts';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }) => {
   const { t } = useTranslation();
-  const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits, updateLockedLessons } = useProject();
+  const { project, updateGeneratedSchedules, updateGeneratedSchedule, updateGeneratedSplits, updateLockedLessons, updateAllowedConflicts } = useProject();
   const [activeSemester, setActiveSemester] = useState<'semester1' | 'semester2'>('semester1');
   const [editMode, setEditMode] = useState<'view' | 'edit'>('view');
   const scheduleResult = project?.generatedSchedules
@@ -52,14 +53,22 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
   const [gapsOpen, setGapsOpen] = useState(false);
   const [teacherLoadOpen, setTeacherLoadOpen] = useState(false);
   const [classLoadOpen, setClassLoadOpen] = useState(false);
+  const [allowedOpen, setAllowedOpen] = useState(false);
 
   const days = DAYS;
   const allPeriods = ALL_PERIODS;
 
-  const conflictKeys = useMemo(() => {
-    const keys = new Set<string>();
+  // Raw overlap facts per lesson (teacher-slot and group-slot overlaps only,
+  // same as the edit grid's conflict badge). Records why a lesson conflicts so
+  // view mode can show an approved overlap as "allowed" instead of red.
+  const conflictInfo = useMemo(() => {
+    const reasons = new Map<string, Set<AllowedConflictReason>>();
     const teacherSlot = new Map<string, Map<string, string[]>>();
     const groupSlot = new Map<string, Map<string, string[]>>();
+    const mark = (lid: string, reason: AllowedConflictReason) => {
+      if (!reasons.has(lid)) reasons.set(lid, new Set());
+      reasons.get(lid)!.add(reason);
+    };
 
     for (const lesson of schedule) {
       const slotKey = `${lesson.day}-${lesson.period}`;
@@ -69,7 +78,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
         if (!teacherSlot.get(lesson.teacherId)!.has(slotKey)) teacherSlot.get(lesson.teacherId)!.set(slotKey, []);
         teacherSlot.get(lesson.teacherId)!.get(slotKey)!.push(lesson.id);
         if (teacherSlot.get(lesson.teacherId)!.get(slotKey)!.length > 1) {
-          for (const lid of teacherSlot.get(lesson.teacherId)!.get(slotKey)!) keys.add(lid);
+          for (const lid of teacherSlot.get(lesson.teacherId)!.get(slotKey)!) mark(lid, 'TEACHER_SLOT');
         }
       }
 
@@ -82,11 +91,24 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
       });
       slotLessons.push(lesson.id);
       if (slotLessons.length > 1 && !isSameSubjectSplit) {
-        for (const lid of slotLessons) keys.add(lid);
+        for (const lid of slotLessons) mark(lid, 'GROUP_SLOT');
       }
     }
-    return keys;
-  }, [schedule]);
+
+    const activeConflicts = new Set<string>();
+    const allowedConflicts = new Set<string>();
+    for (const [lid, reasonSet] of reasons) {
+      const lesson = schedule.find(l => l.id === lid);
+      if (!lesson) continue;
+      const covered = [...reasonSet].every(r => isAllowedConflict(project?.allowedConflicts, lesson, r));
+      if (covered) allowedConflicts.add(lid);
+      else activeConflicts.add(lid);
+    }
+    return { activeConflicts, allowedConflicts };
+  }, [schedule, project]);
+
+  const conflictKeys = conflictInfo.activeConflicts;
+  const allowedConflictKeys = conflictInfo.allowedConflicts;
 
   const displayedLessons = useMemo(() => {
     if (filterType === 'all') return schedule;
@@ -303,6 +325,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
     return lesson ? matchesLock(lesson) : false;
   };
   const isConflict = (lessonId: string) => conflictKeys.has(lessonId);
+  const isAllowedConflictLesson = (lessonId: string) => allowedConflictKeys.has(lessonId);
 
   const handleEditorSave = (result: ScheduleResult, splits?: SemesterSplit[]) => {
     if (!project) return;
@@ -327,6 +350,50 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
     updateLockedLessons(exists
       ? current.filter(l => !(l.ruleId === lesson.ruleId && l.day === lesson.day && l.period === lesson.period && l.semester === semester))
       : [...current, { ruleId: lesson.ruleId, day: lesson.day, period: lesson.period, semester } as LockedLesson]);
+  };
+
+  // "Allow this conflict": the editor computes the consent records that make a
+  // lesson's conflicts allowed (teacher + class, class alone, or room + class)
+  // and asks the viewer to toggle them on/off. Records are keyed by entity, so
+  // they survive regeneration and are saved with the project (.schoolproj).
+  const handleToggleAllowedConflict = (_lesson: Lesson, records: AllowedConflict[]) => {
+    if (!project || records.length === 0) return;
+    const current = project.allowedConflicts || [];
+    const signature = (a: AllowedConflict) => allowedConflictSignature(a);
+    const scope = records.map(signature);
+    const allPresent = scope.every(s => current.some(c => signature(c) === s));
+    updateAllowedConflicts(allPresent
+      ? current.filter(c => !scope.includes(signature(c)))
+      : [
+        ...current,
+        ...records.filter(r => !current.some(c => signature(c) === signature(r))),
+      ]);
+  };
+
+  const allowedReasonLabel = (r: AllowedConflictReason) => {
+    const key = {
+      TEACHER_SLOT: 'allowed_reason_teacher',
+      GROUP_SLOT: 'allowed_reason_group',
+      ROOM_SLOT: 'allowed_reason_room',
+      TEACHER_BUSY: 'allowed_reason_busy',
+      NO_FIRST: 'allowed_reason_no_first',
+      OUT_OF_RANGE: 'allowed_reason_range',
+      DAILY_OVERLOAD: 'allowed_reason_overload',
+      DAILY_RULE: 'allowed_reason_daily_rule',
+      '*': 'allowed_reason_all',
+    }[r];
+    return t(key);
+  };
+
+  const allowedConflictDescription = (a: AllowedConflict) => {
+    if (a.kind === 'teacher') return `${getTeacherName(a.teacherId) || '?'} + ${getGroupName(a.groupId || '')}`;
+    if (a.kind === 'room') return `${getRoomName(a.roomId || '')} + ${getGroupName(a.groupId || '')}`;
+    return getGroupName(a.groupId || '') || getRoomName(a.roomId || '') || '?';
+  };
+
+  const handleRemoveAllowedConflict = (id: string) => {
+    if (!project) return;
+    updateAllowedConflicts((project.allowedConflicts || []).filter(a => a.id !== id));
   };
 
   const hasSchedule = schedule.length > 0;
@@ -393,6 +460,11 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
 
         {hasSchedule && (
           <div className="export-actions">
+            {project?.allowedConflicts && project.allowedConflicts.length > 0 && (
+              <button onClick={() => setAllowedOpen(true)} className="export-btn" title={t('allowed_conflicts_hint')}>
+                {t('allowed_conflicts_manage', { count: project.allowedConflicts.length })}
+              </button>
+            )}
             <button onClick={() => setTeacherLoadOpen(true)} className="export-btn">{t('teacher_load')}</button>
             <button onClick={() => setClassLoadOpen(true)} className="export-btn">{t('class_load')}</button>
             <button onClick={() => setExportOpen(true)} className="export-btn">{t('export')}</button>
@@ -444,6 +516,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                 onSave={handleEditorSave}
                 filter={{ type: filterType, id: filterId }}
                 onToggleLock={handleToggleLock}
+                onToggleAllowedConflict={handleToggleAllowedConflict}
               />
             </div>
           )}
@@ -474,7 +547,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                           const lesson = lessons[0];
                           return (
                             <div
-                              className={`lesson-box ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''}`}
+                              className={`lesson-box ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''} ${isAllowedConflictLesson(lesson.id) ? 'allowed-conflict' : ''}`}
                               onClick={() => handleToggleLock(lesson)}
                               title={isLocked(lesson.id) ? t('click_to_unlock') : t('click_to_lock')}
                             >
@@ -485,6 +558,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                               </div>
                               {isLocked(lesson.id) && <div className="lock-badge">{t('locked')}</div>}
                               {isConflict(lesson.id) && <div className="conflict-badge-small">!</div>}
+                              {isAllowedConflictLesson(lesson.id) && <div className="conflict-badge-small allowed">{'✓'}</div>}
                             </div>
                           );
                         })() : (
@@ -492,7 +566,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                             {lessons.map(lesson => (
                               <div
                                 key={lesson.id}
-                                className={`lesson-box mini ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''}`}
+                                className={`lesson-box mini ${isLocked(lesson.id) ? 'locked' : ''} ${isConflict(lesson.id) ? 'conflict' : ''} ${isAllowedConflictLesson(lesson.id) ? 'allowed-conflict' : ''}`}
                                 onClick={() => handleToggleLock(lesson)}
                                 title={isLocked(lesson.id) ? t('click_to_unlock') : t('click_to_lock')}
                               >
@@ -502,6 +576,7 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
                                 </div>
                                 {isLocked(lesson.id) && <div className="lock-badge">{t('locked')}</div>}
                                 {isConflict(lesson.id) && <div className="conflict-badge-small">!</div>}
+                                {isAllowedConflictLesson(lesson.id) && <div className="conflict-badge-small allowed">{'✓'}</div>}
                               </div>
                             ))}
                           </div>
@@ -584,6 +659,22 @@ export const ScheduleViewer = ({ editorSession = 0 }: { editorSession?: number }
               <span className="detail-main">{t('total')}</span>
               <span className="detail-meta">{t('lessons_count', { count: teacherLoads.reduce((s, r) => s + r.count, 0) })}</span>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={allowedOpen} onClose={() => setAllowedOpen(false)} title={t('allowed_conflicts')}>
+        {(project?.allowedConflicts?.length || 0) === 0 ? (
+          <div className="detail-empty">{t('allowed_conflicts_none')}</div>
+        ) : (
+          <div className="detail-list">
+            {(project?.allowedConflicts || []).map(a => (
+              <div key={a.id} className="detail-row">
+                <span className="detail-main">{allowedConflictDescription(a)}</span>
+                <span className="detail-meta">{allowedReasonLabel(a.reason)}</span>
+                <button onClick={() => handleRemoveAllowedConflict(a.id)} className="remove-allowed-btn" title={t('allowed_conflict_remove')}>&times;</button>
+              </div>
+            ))}
           </div>
         )}
       </Modal>

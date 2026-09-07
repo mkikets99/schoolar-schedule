@@ -12,6 +12,7 @@ import {
   computeGroupScheduleConfig,
 } from '../shared/types';
 import { eligibleTeachers } from '../shared/eligibility';
+import { buildAllowedConsentSets, AllowedConsentSets } from '../shared/allowedConflicts';
 import { buildScheduleScore } from './score';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -72,6 +73,9 @@ export interface RearrangeContext {
   isSplitOrDoublePartner: (schedule: Lesson[], l: Lesson) => boolean;
   roomHasCapacity: (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number) => boolean;
   maxGroupsByTeacher: Map<string, number>;
+  /** Approved-overlap consent (allowed conflicts): teacher/room may exceed its
+   *  simultaneous-group cap only when every group involved has an agreement. */
+  allowedConsent: AllowedConsentSets;
   /** The originating project, retained so edit/generation-time rearrange can
    *  score the resulting schedule through `buildScheduleScore` (v4-32) instead
    *  of returning the first feasible cascade. */
@@ -111,6 +115,14 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     if (semester && lock.semester && lock.semester !== semester) continue;
     lockedSlots.add(`${lock.ruleId}|${lock.day}|${lock.period}`);
   }
+
+  // Approved overlaps: a teacher/room may take one more group at a slot than
+  // its maxGroups cap when every group involved has a recorded consent.
+  const allowedConsent = buildAllowedConsentSets(project.allowedConflicts);
+  const teacherOverlapAllowed = (teacherId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.teacher.has(`${teacherId}|${g}`));
+  const roomOverlapAllowed = (roomId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.room.has(`${roomId}|${g}`));
 
   const isBusy = (teacherId: string, day: string, period: number) =>
     teacherBusyRules.some(
@@ -178,13 +190,15 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     );
 
   // True when a room can host another lesson of `groupId` at the slot: either
-  // the room has not yet reached its simultaneous-group cap, or the group is
-  // already in the room there (a split/double partner re-using the room).
+  // the room has not yet reached its simultaneous-group cap, the group is
+  // already in the room there (a split/double partner re-using the room), or
+  // the overlap is an approved conflict covering every class in the room.
   const roomHasCapacity = (occ: SlotOccupancy, roomId: string, groupId: string, day: string, period: number): boolean => {
     const occupants = occ.room.get(roomId)?.get(`${day}|${period}`);
     if (!occupants) return true;
     const cap = maxGroupsByRoom.get(roomId) ?? 1;
-    return occupants.has(groupId) || occupants.size < cap;
+    if (occupants.has(groupId) || occupants.size < cap) return true;
+    return roomOverlapAllowed(roomId, [groupId, ...occupants]);
   };
 
   const slotFree = (occ: SlotOccupancy, l: PlacableLesson, day: string, period: number, teacherId?: string, excludeId?: string): boolean => {
@@ -196,8 +210,12 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     if (occ.group.get(l.groupId)?.has(`${day}|${period}`)) return false;
     if (teacher) {
       const teacherOccupants = occ.teacher.get(teacher)?.get(`${day}|${period}`);
-      if (teacherOccupants && teacherOccupants.size >= (maxGroupsByTeacher.get(teacher) ?? 1) && !teacherOccupants.has(l.groupId)) {
-        return false;
+      if (
+        teacherOccupants &&
+        teacherOccupants.size >= (maxGroupsByTeacher.get(teacher) ?? 1) &&
+        !teacherOccupants.has(l.groupId)
+      ) {
+        if (!teacherOverlapAllowed(teacher, [l.groupId, ...teacherOccupants])) return false;
       }
     }
     if (l.roomId && !roomHasCapacity(occ, l.roomId, l.groupId, day, period)) return false;
@@ -252,6 +270,7 @@ export function createRearrangeContext(project: ProjectState, semester?: 'semest
     isSplitOrDoublePartner,
     roomHasCapacity,
     maxGroupsByTeacher,
+    allowedConsent,
     project,
   };
 }

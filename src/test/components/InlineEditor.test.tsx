@@ -631,4 +631,51 @@ describe('InlineEditor lesson locks', () => {
     fireEvent.doubleClick(lesson);
     expect(onToggleLock).toHaveBeenCalledTimes(1);
   });
+
+  it('lets a conflicted lesson be toggled allowed, recording both teacher consents', () => {
+    const onToggleAllowedConflict = vi.fn();
+    const { container } = render(
+      <InlineEditor
+        project={makeTwoGroupProject()}
+        activeSemester="semester1"
+        onSave={vi.fn()}
+        onToggleAllowedConflict={onToggleAllowedConflict}
+      />
+    );
+    const badge = container.querySelector('.timeline-lesson-conflict-badge')! as HTMLButtonElement;
+    expect(badge).toBeTruthy();
+    expect(badge.className).not.toContain('allowed');
+    fireEvent.click(badge);
+    expect(onToggleAllowedConflict).toHaveBeenCalledTimes(1);
+    const records = onToggleAllowedConflict.mock.calls[0][1];
+    expect(records.length).toBeGreaterThanOrEqual(2);
+    // Overlapping classes g1 and g2 both need a teacher consent record.
+    expect(records.some((r: any) => r.reason === 'TEACHER_SLOT' && r.groupId === 'g1')).toBe(true);
+    expect(records.some((r: any) => r.reason === 'TEACHER_SLOT' && r.groupId === 'g2')).toBe(true);
+  });
+
+  it('shows a check badge when every raw reason is consented, and unallows on click', () => {
+    const onToggleAllowedConflict = vi.fn();
+    const project: ProjectState = {
+      ...makeTwoGroupProject(),
+      allowedConflicts: [
+        { id: 'a1', kind: 'teacher', teacherId: 't1', groupId: 'g1', reason: 'TEACHER_SLOT' },
+        { id: 'a2', kind: 'teacher', teacherId: 't1', groupId: 'g2', reason: 'TEACHER_SLOT' },
+        { id: 'a3', kind: 'room', roomId: 'r1', groupId: 'g1', reason: 'ROOM_SLOT' },
+        { id: 'a4', kind: 'room', roomId: 'r1', groupId: 'g2', reason: 'ROOM_SLOT' },
+      ],
+    };
+    const { container } = render(
+      <InlineEditor
+        project={project}
+        activeSemester="semester1"
+        onSave={vi.fn()}
+        onToggleAllowedConflict={onToggleAllowedConflict}
+      />
+    );
+    const badge = container.querySelector('.timeline-lesson-conflict-badge')! as HTMLButtonElement;
+    expect(badge.className).toContain('allowed');
+    fireEvent.click(badge);
+    expect(onToggleAllowedConflict).toHaveBeenCalledTimes(1);
+  });
 });

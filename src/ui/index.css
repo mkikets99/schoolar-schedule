@@ -1272,6 +1272,20 @@ tr.unassigned {
   font-size: 0.55rem;
 }
 
+.conflict-badge-small.allowed {
+  background-color: #4CAF50;
+}
+
+.remove-allowed-btn {
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+  font-size: 1rem;
+  margin-left: 0.5rem;
+  line-height: 1;
+}
+
 .summary-badge {
   font-size: 0.85rem;
   color: #888;
@@ -1890,12 +1904,20 @@ tr.split-group + tr.split-group td {
   width: 12px;
   height: 12px;
   background: #ff4d4d;
+  border: none;
   border-radius: 50%;
   font-size: 0.55rem;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.timeline-lesson-conflict-badge.allowed {
+  background: #4CAF50;
 }
 
 .timeline-lesson-remove {

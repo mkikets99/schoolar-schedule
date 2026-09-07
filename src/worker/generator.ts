@@ -1,4 +1,5 @@
 import { ProjectState, CurriculumRule, WorkerMessage, SemesterSplit, SemesterSchedules, ScheduleResult, computeGroupScheduleConfig, GroupScheduleConfig, GenerateSettings, buildMaxDailyByRule, RearrangeMove, LockedLesson, ScheduleScore, GenerationLogEntry } from '../shared/types';
+import { buildAllowedConsentSets } from '../shared/allowedConflicts';
 import { RearrangeContext, createRearrangeContext, resolveUnplacedPlacement } from './rearrange';
 import { buildScheduleScore, compareScores, scoreVectorToNumber } from './score';
 
@@ -347,6 +348,29 @@ async function runGenerate(
     maxGroupsByTeacher.set(teacher.id, Math.max(1, teacher.maxGroups ?? 1));
   }
 
+  // Allowed conflicts: an approved overlap lets a teacher/room exceed its
+  // simultaneous-group cap, but only when EVERY group involved (the new lesson
+  // plus each group already occupying the slot) has a recorded agreement with
+  // the resource holder. Unapproved overlaps stay hard. Approved overlaps are
+  // the engine's top-priority way to open space: they turn a would-be
+  // UNASSIGNED_HOURS lesson into a placed one before any relocation cascade.
+  const allowedConsent = buildAllowedConsentSets(project.allowedConflicts);
+  const teacherOverlapAllowed = (teacherId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.teacher.has(`${teacherId}|${g}`));
+  const roomOverlapAllowed = (roomId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.room.has(`${roomId}|${g}`));
+
+  // Group-level generator emphasis: the groups named in an allowed-conflict
+  // record are placed first. Consenting to a conflict is the school telling the
+  // engine "this class's lesson must land even if it overlaps" - so it becomes a
+  // placement priority, not just a passive tolerance. Only the group is keyed
+  // here (records carry no ruleId), so every unit of a priority group sorts
+  // ahead of non-priority units by this signal alone.
+  const priorityGroupIds = new Set<string>();
+  for (const a of project.allowedConflicts || []) {
+    if (a.groupId) priorityGroupIds.add(a.groupId);
+  }
+
   const groupBusy = new Set<string>();
   // roomId-slotKey -> set of groupIds currently in that room at that slot.
   const roomBusy = new Map<string, Set<string>>();
@@ -517,6 +541,12 @@ async function runGenerate(
   }
 
   units.sort((a, b) => {
+    // Allowed-conflict groups place before everything else: consenting to an
+    // overlap marks the class as needing its lessons placed first, ahead of the
+    // most-constrained-first heuristics below.
+    const pa = priorityGroupIds.has(a.groupId) ? 0 : 1;
+    const pb = priorityGroupIds.has(b.groupId) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
     // v4-34 uses *genuinely* tight units first (few feasible slots, few room
     // options, many locked slots). Soft signals (shared teacher, weekly frequency)
     // stay below the legacy grade->daily-limit->double chain so pre-existing
@@ -561,7 +591,7 @@ async function runGenerate(
     let lastKey = '';
     for (const u of arr) {
       const c = constraintOf.get(u.lessons[0].id);
-      const key = `${c ? `${c.slots}|${c.rooms}|${c.locks}|${c.share}|${c.freq}` : ''}|${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}|${groupLessonTotals.get(u.groupId) || 0}|${u.lessons[0]?.teacherId || ''}`;
+      const key = `${priorityGroupIds.has(u.groupId) ? 1 : 0}|${c ? `${c.slots}|${c.rooms}|${c.locks}|${c.share}|${c.freq}` : ''}|${groupGrade.get(u.groupId) ?? 0}|${groupConfig.get(u.groupId)?.maxDaily ?? 8}|${u.type === 'double' ? 0 : 1}|${groupLessonTotals.get(u.groupId) || 0}|${u.lessons[0]?.teacherId || ''}`;
       if (key !== lastKey && run.length > 0) {
         shuffleInPlace(run, rngFn);
         out.push(...run);
@@ -615,7 +645,10 @@ async function runGenerate(
     const capOk = (roomId: string) => {
       const occupants = roomBusy.get(`${roomId}-${slotKey}`);
       if (!occupants) return true;
-      return occupants.has(lesson.groupId) || occupants.size < (maxGroupsByRoom.get(roomId) ?? 1);
+      if (occupants.has(lesson.groupId) || occupants.size < (maxGroupsByRoom.get(roomId) ?? 1)) return true;
+      // Approved room overlap (allowed conflict): every class sharing the room
+      // at this slot has agreed, so the room may exceed its simultaneous cap.
+      return roomOverlapAllowed(roomId, [lesson.groupId, ...occupants]);
     };
     const out: string[] = [];
     const seen = new Set<string>();
@@ -655,11 +688,12 @@ async function runGenerate(
     if (!skipGroupCheck && groupBusy.has(`${lesson.groupId}-${slotKey}`)) return false;
     // A teacher may teach up to maxGroups groups in the same slot. Its own
     // group already occupying the slot (e.g. a split/double partner) is always
-    // allowed; a new group needs spare capacity.
+    // allowed; a new group needs spare capacity, unless the overlap is an
+    // approved conflict covering every class involved.
     if (lesson.teacherId) {
       const occupants = teacherOccupancy.get(`${lesson.teacherId}-${slotKey}`);
       if (occupants && occupants.size >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1) && !occupants.has(lesson.groupId)) {
-        return false;
+        if (!teacherOverlapAllowed(lesson.teacherId, [lesson.groupId, ...occupants])) return false;
       }
     }
     if (lesson.teacherId && isTeacherBusyRule(lesson.teacherId, day, period)) return false;
@@ -1370,6 +1404,14 @@ export function localSearch(
   const maxGroupsByTeacher = new Map<string, number>();
   for (const teacher of project.teachers || []) maxGroupsByTeacher.set(teacher.id, Math.max(1, teacher.maxGroups ?? 1));
 
+  // Allowed-overlap consent (see generateSchedule): a local-search move may
+  // create an approved overlap, but never an unapproved one.
+  const allowedConsent = buildAllowedConsentSets(project.allowedConflicts);
+  const teacherOverlapAllowed = (teacherId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.teacher.has(`${teacherId}|${g}`));
+  const roomOverlapAllowed = (roomId: string, groups: string[]): boolean =>
+    groups.every((g) => allowedConsent.room.has(`${roomId}|${g}`));
+
   const ruleMaxDaily = buildMaxDailyByRule(project);
   const maxDailyByGroup = new Map<string, number>();
   for (const group of project.groups || []) maxDailyByGroup.set(group.id, groupConfig.get(group.id)?.maxDaily ?? 8);
@@ -1449,6 +1491,8 @@ export function localSearch(
     let groupAtSlot = false;
     let teacherGroups = 0;
     let roomGroups = 0;
+    const teacherOverlapGroups: string[] = [lesson.groupId];
+    const roomOverlapGroups: string[] = [lesson.groupId];
     for (const other of all) {
       if (other === lesson) continue;
       if (other.day === day && other.period === period) {
@@ -1456,13 +1500,19 @@ export function localSearch(
           groupAtSlot = true;
           break;
         }
-        if (lesson.teacherId && other.teacherId === lesson.teacherId) teacherGroups++;
-        if (lesson.roomId && other.roomId === lesson.roomId) roomGroups++;
+        if (lesson.teacherId && other.teacherId === lesson.teacherId) {
+          teacherGroups++;
+          teacherOverlapGroups.push(other.groupId);
+        }
+        if (lesson.roomId && other.roomId === lesson.roomId) {
+          roomGroups++;
+          roomOverlapGroups.push(other.groupId);
+        }
       }
     }
     if (groupAtSlot) return false;
-    if (lesson.teacherId && teacherGroups >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1)) return false;
-    if (lesson.roomId && roomGroups >= (maxGroupsByRoom.get(lesson.roomId) ?? 1)) return false;
+    if (lesson.teacherId && teacherGroups >= (maxGroupsByTeacher.get(lesson.teacherId) ?? 1) && !teacherOverlapAllowed(lesson.teacherId, teacherOverlapGroups)) return false;
+    if (lesson.roomId && roomGroups >= (maxGroupsByRoom.get(lesson.roomId) ?? 1) && !roomOverlapAllowed(lesson.roomId, roomOverlapGroups)) return false;
     let groupDay = 0;
     let ruleDay = 0;
     for (const other of all) {

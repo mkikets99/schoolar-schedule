@@ -1,4 +1,5 @@
-import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig, buildMaxDailyByRule } from '../../shared/types';
+import { Lesson, ProjectState, CurriculumRule, computeGroupScheduleConfig, buildMaxDailyByRule, AllowedConflictReason } from '../../shared/types';
+import { isAllowedConflict } from '../../shared/allowedConflicts';
 
 export const CONFLICT_REASON = {
   TEACHER_SLOT: 'conflict_teacher_slot',
@@ -10,6 +11,15 @@ export const CONFLICT_REASON = {
   DAILY_OVERLOAD: 'conflict_daily_overload',
   DAILY_RULE: 'conflict_daily_rule',
 } as const;
+
+// Reverse map: i18n conflict key -> raw reason type ('conflict_teacher_slot' ->
+// 'TEACHER_SLOT'). Allowed-conflict records store the raw type; the analyzer
+// reports atoms by their i18n key, so suppression needs the reverse lookup.
+const REASON_TYPE_BY_KEY: Record<string, AllowedConflictReason> = {};
+for (const [type, key] of Object.entries(CONFLICT_REASON)) REASON_TYPE_BY_KEY[key] = type as AllowedConflictReason;
+
+/** Map an i18n conflict key back to the raw AllowedConflictReason type. */
+export const conflictReasonTypeOf = (key: string): AllowedConflictReason | undefined => REASON_TYPE_BY_KEY[key];
 
 export const EMPTY_SLOT_REASON = {
   CURRICULUM_DONE: 'empty_slot_curriculum_done',
@@ -201,6 +211,11 @@ export function analyzeEmptySlots(
 export function analyzeSchedule(placed: Lesson[], pool: Lesson[], project: ProjectState): ScheduleAnalysis {
   const reasons = new Map<string, string[]>();
   const add = (id: string, reason: string) => {
+    // Atoms that a recorded allowance covers are not reported at all: allowed
+    // conflicts are tolerated by agreement, not surfaced as problems.
+    const type = conflictReasonTypeOf(reason);
+    const lesson = lessonById.get(id);
+    if (type && lesson && isAllowedConflict(project.allowedConflicts, lesson, type)) return;
     if (!reasons.has(id)) reasons.set(id, []);
     if (!reasons.get(id)!.includes(reason)) reasons.get(id)!.push(reason);
   };

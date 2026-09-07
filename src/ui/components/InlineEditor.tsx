@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, ScheduleFilter, SemesterSplit } from '../../shared/types';
-import { analyzeSchedule, buildConflicts, computeScore, countLessons } from '../services/scheduleAnalyzer';
+import { CurriculumRule, Lesson, ProjectState, RearrangeSuggestion, ScheduleResult, ScheduleFilter, SemesterSplit, AllowedConflict, AllowedConflictReason } from '../../shared/types';
+import { analyzeSchedule, buildConflicts, computeScore, countLessons, conflictReasonTypeOf } from '../services/scheduleAnalyzer';
+import { recordsToAllowLesson, isAllowedConflict } from '../../shared/allowedConflicts';
 import { workerPool } from '../services/workerPool';
 import { Modal } from './Modal';
 
@@ -15,6 +16,7 @@ interface InlineEditorProps {
   onSave: (result: ScheduleResult, splits?: SemesterSplit[]) => void;
   filter?: ScheduleFilter;
   onToggleLock?: (lesson: Lesson) => void;
+  onToggleAllowedConflict?: (lesson: Lesson, records: AllowedConflict[]) => void;
   active?: boolean;
   sessionKey?: number;
 }
@@ -26,7 +28,7 @@ interface HistoryEntry {
   splits: SemesterSplit[];
 }
 
-export const InlineEditor = ({ project, activeSemester, onSave, filter = { type: 'all', id: '' }, onToggleLock, active = true, sessionKey }: InlineEditorProps) => {
+export const InlineEditor = ({ project, activeSemester, onSave, filter = { type: 'all', id: '' }, onToggleLock, onToggleAllowedConflict, active = true, sessionKey }: InlineEditorProps) => {
   const { t } = useTranslation();
   const [gridLessons, setGridLessons] = useState<Lesson[]>([]);
   const [poolLessons, setPoolLessons] = useState<Lesson[]>([]);
@@ -374,6 +376,34 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
     [gridLessons, activePool, project]
   );
 
+  // Unsuppressed analysis: the conflicts the analyzer WOULD flag before any
+  // recorded allowance is applied. Drives both the "allow this conflict" action
+  // (which lessons can be consented off) and the reverse: a lesson whose every
+  // raw reason is covered by an allowance shows as allowed and can be re-flagged.
+  const rawAnalysis = useMemo(
+    () => analyzeSchedule(gridLessons, activePool, { ...project, allowedConflicts: [] }),
+    [gridLessons, activePool, project]
+  );
+  const allowedLessonIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const lesson of gridLessons) {
+      const reasons = rawAnalysis.byLesson.get(lesson.id) || [];
+      if (reasons.length === 0) continue;
+      if (reasons.every(r => {
+        const type = conflictReasonTypeOf(r);
+        return type ? isAllowedConflict(project.allowedConflicts, lesson, type) : false;
+      })) ids.add(lesson.id);
+    }
+    return ids;
+  }, [rawAnalysis, gridLessons, project]);
+  const recordsForLesson = (lesson: Lesson): AllowedConflict[] => {
+    const reasons = (rawAnalysis.byLesson.get(lesson.id) || [])
+      .map(conflictReasonTypeOf)
+      .filter((r): r is AllowedConflictReason => !!r);
+    if (reasons.length === 0) return [];
+    return recordsToAllowLesson(lesson, rawAnalysis.causesByLesson.get(lesson.id) || [], reasons);
+  };
+
   const visibleGrid = useMemo(
     () => gridLessons.filter(matchesFilter),
     [gridLessons, filter]
@@ -571,6 +601,7 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
     const reasons = analysis.byLesson.get(lesson.id) || [];
     const subject = getSubject(lesson.subjectId);
     const conflicted = reasons.length > 0;
+    const allowed = allowedLessonIds.has(lesson.id);
     const locked = lockedKeys.has(`${lesson.ruleId}|${lesson.day}|${lesson.period}`);
     return (
       <div
@@ -585,7 +616,24 @@ export const InlineEditor = ({ project, activeSemester, onSave, filter = { type:
         <span className="timeline-lesson-subject">{subject?.shortName || subject?.name || '?'}</span>
         <span className="timeline-lesson-group">{getGroupName(lesson.groupId)}</span>
         {locked && <span className="timeline-lesson-lock-badge">{t('locked')}</span>}
-        {conflicted && <span className="timeline-lesson-conflict-badge">!</span>}
+        {conflicted && (
+          <button
+            className="timeline-lesson-conflict-badge"
+            onClick={() => onToggleAllowedConflict?.(lesson, recordsForLesson(lesson))}
+            title={t('allow_conflict')}
+          >
+            !
+          </button>
+        )}
+        {!conflicted && allowed && (
+          <button
+            className="timeline-lesson-conflict-badge allowed"
+            onClick={() => onToggleAllowedConflict?.(lesson, recordsForLesson(lesson))}
+            title={t('unallow_conflict')}
+          >
+            &#10003;
+          </button>
+        )}
         <button
           className="timeline-lesson-remove"
           draggable={false}

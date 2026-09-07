@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult, AcademicYear, Constraint, SemesterSchedules, SemesterSplit, LockedLesson } from '../../shared/types';
+import { ProjectState, School, Teacher, Subject, Room, Group, CurriculumRule, LoadDistribution, ScheduleResult, AcademicYear, Constraint, SemesterSchedules, SemesterSplit, LockedLesson, AllowedConflict } from '../../shared/types';
 import { storageService } from '../services/StorageService';
 
 interface ProjectContextType {
@@ -19,6 +19,7 @@ interface ProjectContextType {
   updateGeneratedSplits: (splits: SemesterSplit[] | undefined) => void;
   updateGeneratedSchedule: (result: ScheduleResult | undefined) => void;
   updateLockedLessons: (lockedLessons: LockedLesson[]) => void;
+  updateAllowedConflicts: (allowedConflicts: AllowedConflict[]) => void;
   clearGeneratedSchedule: () => void;
   createNewProject: (name: string) => void;
 }
@@ -126,6 +127,10 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     setProject(prev => prev ? { ...prev, lockedLessons } : prev);
   };
 
+  const updateAllowedConflicts = (allowedConflicts: AllowedConflict[]) => {
+    setProject(prev => prev ? { ...prev, allowedConflicts } : prev);
+  };
+
   const clearGeneratedSchedule = () => {
     updateGeneratedSchedules(undefined);
     updateGeneratedSplits(undefined);
@@ -150,6 +155,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
       updateGeneratedSplits,
       updateGeneratedSchedule,
       updateLockedLessons,
+      updateAllowedConflicts,
       clearGeneratedSchedule,
       createNewProject 
     }}>

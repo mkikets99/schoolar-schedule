@@ -24,6 +24,7 @@ export const exportProject = async (project: ProjectState) => {
       'load_distribution.json',
       'constraints.json',
       'locked_lessons.json',
+      'allowed_conflicts.json',
       'schedule.json',
       'semester_schedules.json',
       'semester_splits.json'
@@ -41,6 +42,7 @@ export const exportProject = async (project: ProjectState) => {
   zip.file('load_distribution.json', JSON.stringify(project.loadDistribution, null, 2));
   zip.file('constraints.json', JSON.stringify(project.constraints, null, 2));
   zip.file('locked_lessons.json', JSON.stringify(project.lockedLessons || [], null, 2));
+  zip.file('allowed_conflicts.json', JSON.stringify(project.allowedConflicts || [], null, 2));
   
   if (project.generatedSchedules) {
     zip.file('semester_schedules.json', JSON.stringify(project.generatedSchedules, null, 2));
@@ -103,6 +105,7 @@ export const importProject = async (file: File): Promise<ProjectState> => {
       loadDistribution: await readJson('load_distribution.json'),
       constraints: await readJson('constraints.json'),
       lockedLessons: await readJson('locked_lessons.json', undefined),
+      allowedConflicts: await readJson('allowed_conflicts.json', undefined),
       generatedSchedule: await readJson('schedule.json', null),
       generatedSchedules: await readJson('semester_schedules.json', undefined),
       generatedSplits: await readJson('semester_splits.json', undefined)

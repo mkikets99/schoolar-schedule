@@ -62,6 +62,43 @@ describe('suggestRearrange', () => {
     expect(s.moves[1].toDay + s.moves[1].toPeriod).not.toBe('Monday2');
   });
 
+  it('moves straight onto an approved teacher-overlap slot without displacing anyone', () => {
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { id: 'l2', groupId: 'g2', ruleId: 'c2', period: 2, roomId: 'r2' }),
+    ];
+    const project = makeProject({
+      allowedConflicts: [
+        { id: 'a1', kind: 'teacher', teacherId: 't1', groupId: 'g1', reason: 'TEACHER_SLOT' },
+        { id: 'a2', kind: 'teacher', teacherId: 't1', groupId: 'g2', reason: 'TEACHER_SLOT' },
+      ],
+    });
+    const s = suggestRearrange(project, schedule, 'l1', { day: 'Monday', period: 2 });
+    expect(s.feasible).toBe(true);
+    expect(s.moves).toHaveLength(1);
+    expect(s.moves[0]).toMatchObject({ lessonId: 'l1', toDay: 'Monday', toPeriod: 2 });
+  });
+
+  it('still blocks the same move when only one side of the overlap consents', () => {
+    const schedule = [
+      makeLesson('l1', { period: 1 }),
+      makeLesson('l2', { id: 'l2', groupId: 'g2', ruleId: 'c2', period: 2, roomId: 'r2' }),
+    ];
+    // Only class g1 agreed with the teacher; g2 has not -> the overlap is hard.
+    // The engine must NOT let t1 teach both groups at Monday/2: it either
+    // reassigns the lesson to t2 or displaces l2 (never a direct same-teacher
+    // overlap).
+    const project = makeProject({
+      allowedConflicts: [
+        { id: 'a1', kind: 'teacher', teacherId: 't1', groupId: 'g1', reason: 'TEACHER_SLOT' },
+      ],
+    });
+    const s = suggestRearrange(project, schedule, 'l1', { day: 'Monday', period: 2 });
+    expect(s.feasible).toBe(true);
+    const directOverlap = s.moves.length === 1 && !s.teacherIdForMain && s.moves[0].toPeriod === 2;
+    expect(directOverlap).toBe(false);
+  });
+
   it('swaps in an eligible free teacher when only a teacher collision blocks the slot', () => {
     const schedule = [makeLesson('l1', { period: 1 })];
     // l1 would be busy for t1 at Monday/3, but t2 can take it.

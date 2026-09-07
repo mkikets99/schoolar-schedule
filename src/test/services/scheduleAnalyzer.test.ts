@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ProjectState, Lesson, Constraint } from '../../shared/types';
+import { ProjectState, Lesson, Constraint, AllowedConflict } from '../../shared/types';
 import {
   analyzeSchedule,
   buildConflicts,
@@ -513,5 +513,82 @@ describe('analyzeEmptySlots', () => {
     const reasons = analyzeEmptySlots(placed, project, buildPendingByRule(placed, pool));
     expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.TEACHER_BUSY);
     expect(reasons.get('g1|Monday|2')).toContain(EMPTY_SLOT_REASON.ROOM_BUSY);
+  });
+});
+
+describe('allowed conflicts', () => {
+  const allowance = (over: Partial<AllowedConflict>): AllowedConflict => ({
+    id: 'a1',
+    kind: 'teacher',
+    teacherId: 't1',
+    groupId: 'g1',
+    reason: 'TEACHER_SLOT',
+    ...over,
+  });
+
+  it('suppresses the teacher slot atom only for the consented class', () => {
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { roomId: undefined }),
+      lesson('l2', 'g2', 'subj2', 'Monday', 1, { teacherId: 't1', roomId: undefined }),
+    ];
+    // Only class g1 agreed with the teacher; the g2 side stays flagged.
+    const project = makeProject({ allowedConflicts: [allowance({})] });
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toBeUndefined();
+    expect(a.byLesson.get('l2')).toContain(CONFLICT_REASON.TEACHER_SLOT);
+  });
+
+  it('clears the whole overlap when every involved class consents', () => {
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { roomId: undefined }),
+      lesson('l2', 'g2', 'subj2', 'Monday', 1, { teacherId: 't1', roomId: undefined }),
+    ];
+    const project = makeProject({
+      allowedConflicts: [
+        allowance({}),
+        allowance({ id: 'a2', groupId: 'g2' }),
+      ],
+    });
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.has('l1') || a.byLesson.has('l2')).toBe(false);
+    expect(a.conflictCount).toBe(0);
+  });
+
+  it('still reports the overlap when the consent is for a different reason', () => {
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { roomId: undefined }),
+      lesson('l2', 'g2', 'subj2', 'Monday', 1, { teacherId: 't1', roomId: undefined }),
+    ];
+    // A GROUP_SLOT waiver must not silence a TEACHER_SLOT overlap.
+    const project = makeProject({
+      allowedConflicts: [allowance({ reason: 'GROUP_SLOT' })],
+    });
+    const a = analyzeSchedule(placed, [], project);
+    expect(a.byLesson.get('l1')).toContain(CONFLICT_REASON.TEACHER_SLOT);
+  });
+
+  it('honours a group waiver for daily overload', () => {
+    const placed = [];
+    // g1's maxDailyLessons=3: four lessons in one day trip DAILY_OVERLOAD.
+    for (let p = 1; p <= 4; p++) placed.push(lesson(`d${p}`, 'g1', 'subj1', 'Monday', p));
+    const project = makeProject({
+      allowedConflicts: [{ id: 'a1', kind: 'group', groupId: 'g1', reason: 'DAILY_OVERLOAD' }],
+    });
+    expect(analyzeSchedule(placed, [], project).byLesson.get('d1')).toBeUndefined();
+    const plain = analyzeSchedule(placed, [], makeProject());
+    expect(plain.byLesson.get('d1')).toContain(CONFLICT_REASON.DAILY_OVERLOAD);
+  });
+
+  it('removes allowed atoms from buildConflicts and restores computeScore', () => {
+    const placed = [
+      lesson('l1', 'g1', 'subj1', 'Monday', 1, { roomId: undefined }),
+      lesson('l2', 'g2', 'subj2', 'Monday', 1, { teacherId: 't1', roomId: undefined }),
+    ];
+    const allowed = [allowance({}), allowance({ id: 'a2', groupId: 'g2' })];
+    const project = makeProject({ allowedConflicts: allowed });
+    const conflicts = buildConflicts(placed, [], project);
+    expect(conflicts.filter(c => c.type === 'MANUAL_CONFLICT')).toHaveLength(0);
+    expect(computeScore(placed, [], project)).toBe(1);
+    expect(computeScore(placed, [], makeProject())).toBe(0.8);
   });
 });
